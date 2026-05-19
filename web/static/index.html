@@ -4,204 +4,407 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Avatar Upload</title>
+  <title>GophProfile — Avatar Service</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          animation: {
-            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-          }
-        }
-      }
-    }
-  </script>
 </head>
 
-<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-  <div class="container mx-auto px-4 py-8 max-w-2xl">
-    <div class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 overflow-hidden">
-      <header class="bg-gradient-to-r from-purple-600 to-blue-600 p-6">
-        <h1 class="text-3xl font-bold text-white text-center">Avatar Upload Service</h1>
-        <p class="text-white/80 text-center mt-2">Upload your avatar image</p>
-      </header>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
+  <div class="container mx-auto px-4 py-8 max-w-3xl space-y-6">
 
-      <main class="p-6 space-y-6">
-        <form id="uploadForm" class="space-y-4">
-          <div>
-            <label for="userId" class="block text-sm font-medium text-white mb-2">
-              User ID <span class="text-red-400">*</span>
-            </label>
-            <input type="text" id="userId" name="userId" required placeholder="Enter your user ID"
-              class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all">
-          </div>
+    <!-- Header -->
+    <header class="bg-gradient-to-r from-purple-600 to-blue-600 rounded-2xl shadow-2xl p-6">
+      <h1 class="text-3xl font-bold text-center">GophProfile</h1>
+      <p class="text-white/80 text-center mt-2">Upload, view, and manage your avatars</p>
+    </header>
 
-          <div>
-            <label for="image" class="block text-sm font-medium text-white mb-2">
-              Choose Image <span class="text-red-400">*</span>
-            </label>
-            <div class="relative">
-              <input type="file" id="image" name="image" accept="image/*" required
-                class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all">
-            </div>
-            <div id="imagePreview" class="mt-4 hidden">
-              <img id="previewImg" src="" alt="Preview" class="w-32 h-32 object-cover rounded-lg shadow-lg mx-auto">
-            </div>
-          </div>
+    <!-- User ID card -->
+    <section class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 p-6 space-y-3">
+      <label for="userId" class="block text-sm font-medium">
+        Your User ID <span class="text-red-400">*</span>
+        <span class="text-xs text-white/60">(UUID v7 — persisted locally)</span>
+      </label>
+      <div class="flex gap-2">
+        <input type="text" id="userId" placeholder="01900000-0000-7000-..."
+          class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-lg placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all">
+        <button type="button" id="genUserBtn"
+          class="px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-sm transition-all">
+          Generate v7
+        </button>
+        <button type="button" id="forgetUserBtn"
+          class="px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-sm transition-all">
+          Forget
+        </button>
+      </div>
+    </section>
 
-          <button type="submit" id="submitBtn"
-            class="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-lg hover:from-purple-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-transparent transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]">
-            <span id="btnText">Upload Avatar</span>
-            <span id="btnLoader" class="hidden">
-              <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg"
-                fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                </path>
-              </svg>
-              Uploading...
-            </span>
-          </button>
-        </form>
+    <!-- Current avatar card -->
+    <section id="currentSection" class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 p-6 hidden">
+      <h2 class="text-xl font-semibold mb-4">Current Avatar</h2>
+      <div class="flex items-center justify-center min-h-[200px]">
+        <img id="currentImg" src="" alt="Current avatar"
+          class="max-h-64 rounded-lg shadow-lg hidden">
+        <p id="currentEmpty" class="text-white/50 hidden">No avatar yet — upload one below.</p>
+      </div>
+    </section>
 
-        <div id="responseContainer" class="hidden">
-          <div class="border-t border-white/20 pt-6">
-            <h2 class="text-xl font-semibold text-white mb-4">API Response</h2>
-            <div id="responseContent" class="space-y-4">
-              <div id="responseStatus" class="px-4 py-3 rounded-lg font-mono text-sm"></div>
-              <div id="responseBody" class="bg-black/30 rounded-lg p-4 overflow-x-auto">
-                <pre id="responseJson" class="text-green-400 text-sm font-mono whitespace-pre-wrap"></pre>
-              </div>
-            </div>
-          </div>
+    <!-- Upload card -->
+    <section id="uploadSection" class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 p-6 space-y-4 hidden">
+      <h2 class="text-xl font-semibold">Upload New Avatar</h2>
+
+      <!-- Drop zone -->
+      <label id="dropZone"
+        class="block border-2 border-dashed border-white/30 rounded-lg p-8 text-center cursor-pointer transition-all hover:border-purple-400 hover:bg-white/5">
+        <input type="file" id="fileInput" accept="image/*" class="hidden">
+        <div id="dropPrompt">
+          <p class="text-white/80 mb-2">Drop an image here, or <span class="text-purple-300 underline">click to choose</span></p>
+          <p class="text-xs text-white/50">JPEG, PNG, or WebP — up to 10 MB</p>
         </div>
+        <img id="previewImg" src="" alt="" class="mx-auto max-h-48 rounded-lg shadow-lg hidden">
+      </label>
 
-        <div id="errorMessage" class="hidden bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg">
+      <!-- Progress bar -->
+      <div id="progressWrap" class="hidden">
+        <div class="flex justify-between text-xs text-white/70 mb-1">
+          <span>Uploading…</span>
+          <span id="progressPct">0%</span>
         </div>
-      </main>
-    </div>
+        <div class="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+          <div id="progressBar" class="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <button type="button" id="uploadBtn" disabled
+        class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition-all">
+        Upload Avatar
+      </button>
+    </section>
+
+    <!-- Gallery card -->
+    <section id="gallerySection" class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 p-6 hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">Your Avatars</h2>
+        <button type="button" id="refreshBtn"
+          class="text-xs text-white/70 hover:text-white px-3 py-1 border border-white/20 rounded transition-all">
+          Refresh
+        </button>
+      </div>
+      <div id="galleryEmpty" class="text-white/50 text-center py-8 hidden">No avatars yet.</div>
+      <div id="galleryGrid" class="grid grid-cols-3 sm:grid-cols-4 gap-3"></div>
+    </section>
+
+    <!-- Last response card (debugging) -->
+    <section class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 p-6">
+      <details>
+        <summary class="cursor-pointer text-sm text-white/70 hover:text-white">Last API response (debug)</summary>
+        <div id="responseStatus" class="mt-3 mb-2 px-3 py-2 rounded font-mono text-xs hidden"></div>
+        <pre id="responseBody" class="bg-black/30 rounded-lg p-3 text-xs text-green-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-64">— no requests yet —</pre>
+      </details>
+    </section>
+
   </div>
 
   <script>
-    const form = document.getElementById('uploadForm');
-    const imageInput = document.getElementById('image');
-    const imagePreview = document.getElementById('imagePreview');
-    const previewImg = document.getElementById('previewImg');
-    const submitBtn = document.getElementById('submitBtn');
-    const btnText = document.getElementById('btnText');
-    const btnLoader = document.getElementById('btnLoader');
-    const responseContainer = document.getElementById('responseContainer');
-    const responseStatus = document.getElementById('responseStatus');
-    const responseJson = document.getElementById('responseJson');
-    const errorMessage = document.getElementById('errorMessage');
+    // ---------- State + persistence ----------
 
-    imageInput.addEventListener('change', function (e) {
-      const file = e.target.files[0];
-      if (file && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = function (e) {
-          previewImg.src = e.target.result;
-          imagePreview.classList.remove('hidden');
-        };
-        reader.readAsDataURL(file);
-      } else {
-        imagePreview.classList.add('hidden');
+    const LS_KEY = 'gophprofile.userId';
+
+    const els = {
+      userId: document.getElementById('userId'),
+      genUserBtn: document.getElementById('genUserBtn'),
+      forgetUserBtn: document.getElementById('forgetUserBtn'),
+      currentSection: document.getElementById('currentSection'),
+      currentImg: document.getElementById('currentImg'),
+      currentEmpty: document.getElementById('currentEmpty'),
+      uploadSection: document.getElementById('uploadSection'),
+      dropZone: document.getElementById('dropZone'),
+      dropPrompt: document.getElementById('dropPrompt'),
+      fileInput: document.getElementById('fileInput'),
+      previewImg: document.getElementById('previewImg'),
+      progressWrap: document.getElementById('progressWrap'),
+      progressBar: document.getElementById('progressBar'),
+      progressPct: document.getElementById('progressPct'),
+      uploadBtn: document.getElementById('uploadBtn'),
+      gallerySection: document.getElementById('gallerySection'),
+      galleryEmpty: document.getElementById('galleryEmpty'),
+      galleryGrid: document.getElementById('galleryGrid'),
+      refreshBtn: document.getElementById('refreshBtn'),
+      responseStatus: document.getElementById('responseStatus'),
+      responseBody: document.getElementById('responseBody'),
+    };
+
+    let selectedFile = null;
+
+    // ---------- Helpers ----------
+
+    function currentUserId() {
+      return els.userId.value.trim();
+    }
+
+    function saveUserId(id) {
+      if (id) localStorage.setItem(LS_KEY, id);
+      else localStorage.removeItem(LS_KEY);
+    }
+
+    // RFC 9562 UUID v7: 48-bit unix ms + version + random.
+    function genUuidV7() {
+      const ts = BigInt(Date.now());
+      const tsHex = ts.toString(16).padStart(12, '0');
+      const rand = new Uint8Array(10);
+      crypto.getRandomValues(rand);
+      rand[0] = (rand[0] & 0x0f) | 0x70; // version 7 in high nibble
+      rand[2] = (rand[2] & 0x3f) | 0x80; // variant 10 in top two bits
+      const rHex = Array.from(rand, b => b.toString(16).padStart(2, '0')).join('');
+      return [
+        tsHex.slice(0, 8),
+        tsHex.slice(8, 12),
+        rHex.slice(0, 4),
+        rHex.slice(4, 8),
+        rHex.slice(8, 20),
+      ].join('-');
+    }
+
+    function bust(url) {
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}_=${Date.now()}`;
+    }
+
+    function showResponse(status, body) {
+      els.responseStatus.classList.remove('hidden');
+      const cls = status >= 200 && status < 300
+        ? 'bg-green-500/20 border border-green-500/50 text-green-200'
+        : 'bg-red-500/20 border border-red-500/50 text-red-200';
+      els.responseStatus.className = `mt-3 mb-2 px-3 py-2 rounded font-mono text-xs ${cls}`;
+      els.responseStatus.textContent = `HTTP ${status}`;
+      try {
+        els.responseBody.textContent = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+      } catch {
+        els.responseBody.textContent = String(body);
       }
+    }
+
+    // ---------- User state UI ----------
+
+    function syncUserUI() {
+      const id = currentUserId();
+      const enabled = id.length > 0;
+      els.currentSection.classList.toggle('hidden', !enabled);
+      els.uploadSection.classList.toggle('hidden', !enabled);
+      els.gallerySection.classList.toggle('hidden', !enabled);
+      if (enabled) {
+        refreshCurrent();
+        refreshGallery();
+      }
+    }
+
+    els.userId.addEventListener('input', () => {
+      saveUserId(currentUserId());
+      syncUserUI();
     });
 
-    form.addEventListener('submit', async function (e) {
-      e.preventDefault();
+    els.genUserBtn.addEventListener('click', () => {
+      els.userId.value = genUuidV7();
+      saveUserId(currentUserId());
+      syncUserUI();
+    });
 
-      const userId = document.getElementById('userId').value;
-      const imageFile = imageInput.files[0];
+    els.forgetUserBtn.addEventListener('click', () => {
+      els.userId.value = '';
+      saveUserId('');
+      syncUserUI();
+    });
 
-      if (!userId || !imageFile) {
-        showError('Please fill in all required fields');
+    // ---------- Current avatar ----------
+
+    function refreshCurrent() {
+      const id = currentUserId();
+      if (!id) return;
+      const url = bust(`/api/v1/users/${id}/avatar`);
+      // We try to load; on 404 the img will fire onerror.
+      els.currentImg.classList.add('hidden');
+      els.currentEmpty.classList.add('hidden');
+      const probe = new Image();
+      probe.onload = () => {
+        els.currentImg.src = url;
+        els.currentImg.classList.remove('hidden');
+      };
+      probe.onerror = () => {
+        els.currentEmpty.classList.remove('hidden');
+      };
+      probe.src = url;
+    }
+
+    // ---------- Gallery ----------
+
+    async function refreshGallery() {
+      const id = currentUserId();
+      if (!id) return;
+      try {
+        const res = await fetch(`/api/v1/users/${id}/avatars`);
+        const body = await res.json();
+        showResponse(res.status, body);
+        if (!res.ok) {
+          renderGallery([]);
+          return;
+        }
+        renderGallery(body.avatars || []);
+      } catch (err) {
+        showResponse(0, `Network error: ${err.message}`);
+        renderGallery([]);
+      }
+    }
+
+    function renderGallery(avatars) {
+      els.galleryGrid.innerHTML = '';
+      els.galleryEmpty.classList.toggle('hidden', avatars.length > 0);
+      for (const a of avatars) {
+        const card = document.createElement('div');
+        card.className = 'relative group rounded-lg overflow-hidden bg-white/5 aspect-square';
+        card.innerHTML = `
+          <img src="${bust('/api/v1/avatars/' + a.id)}" alt="${a.file_name}"
+               class="w-full h-full object-cover">
+          <button type="button" data-id="${a.id}"
+            class="delBtn absolute top-1 right-1 w-7 h-7 rounded-full bg-red-500/70 hover:bg-red-500 text-white text-sm font-bold opacity-0 group-hover:opacity-100 transition-all"
+            title="Delete">✕</button>
+          <span class="absolute bottom-0 left-0 right-0 px-2 py-1 text-[10px] text-white/80 bg-black/40 truncate">${a.file_name}</span>
+        `;
+        els.galleryGrid.appendChild(card);
+      }
+      els.galleryGrid.querySelectorAll('.delBtn').forEach(btn => {
+        btn.addEventListener('click', () => deleteAvatar(btn.dataset.id));
+      });
+    }
+
+    els.refreshBtn.addEventListener('click', () => {
+      refreshCurrent();
+      refreshGallery();
+    });
+
+    async function deleteAvatar(avatarId) {
+      const userId = currentUserId();
+      if (!userId) return;
+      if (!confirm('Delete this avatar?')) return;
+      try {
+        const res = await fetch(`/api/v1/avatars/${avatarId}`, {
+          method: 'DELETE',
+          headers: { 'X-User-ID': userId },
+        });
+        const text = await res.text();
+        showResponse(res.status, text ? safeParse(text) : '(no body)');
+        if (res.ok) {
+          refreshCurrent();
+          refreshGallery();
+        }
+      } catch (err) {
+        showResponse(0, `Network error: ${err.message}`);
+      }
+    }
+
+    function safeParse(text) {
+      try { return JSON.parse(text); } catch { return text; }
+    }
+
+    // ---------- File pick + drag&drop ----------
+
+    function pickFile(file) {
+      if (!file || !file.type.startsWith('image/')) {
+        selectedFile = null;
+        els.previewImg.classList.add('hidden');
+        els.dropPrompt.classList.remove('hidden');
+        els.uploadBtn.disabled = true;
         return;
       }
+      selectedFile = file;
+      const reader = new FileReader();
+      reader.onload = e => {
+        els.previewImg.src = e.target.result;
+        els.previewImg.classList.remove('hidden');
+        els.dropPrompt.classList.add('hidden');
+      };
+      reader.readAsDataURL(file);
+      els.uploadBtn.disabled = false;
+    }
 
-      setLoading(true);
-      hideError();
-      hideResponse();
+    els.fileInput.addEventListener('change', e => pickFile(e.target.files[0]));
 
-      const formData = new FormData();
-      formData.append('image', imageFile);
-
-      try {
-        const response = await fetch('/api/v1/avatars', {
-          method: 'POST',
-          headers: {
-            'X-User-ID': userId
-          },
-          body: formData
-        });
-
-        const responseData = await response.text();
-        let parsedData;
-
-        try {
-          parsedData = JSON.parse(responseData);
-        } catch {
-          parsedData = responseData;
-        }
-
-        displayResponse(response, parsedData);
-
-      } catch (error) {
-        showError(`Network error: ${error.message}`);
-      } finally {
-        setLoading(false);
+    ['dragenter', 'dragover'].forEach(evt =>
+      els.dropZone.addEventListener(evt, e => {
+        e.preventDefault();
+        els.dropZone.classList.add('border-purple-400', 'bg-white/10');
+      })
+    );
+    ['dragleave', 'drop'].forEach(evt =>
+      els.dropZone.addEventListener(evt, e => {
+        e.preventDefault();
+        els.dropZone.classList.remove('border-purple-400', 'bg-white/10');
+      })
+    );
+    els.dropZone.addEventListener('drop', e => {
+      if (e.dataTransfer.files.length > 0) {
+        pickFile(e.dataTransfer.files[0]);
       }
     });
 
-    function setLoading(loading) {
-      if (loading) {
-        submitBtn.disabled = true;
-        btnText.classList.add('hidden');
-        btnLoader.classList.remove('hidden');
-      } else {
-        submitBtn.disabled = false;
-        btnText.classList.remove('hidden');
-        btnLoader.classList.add('hidden');
-      }
-    }
+    // ---------- Upload via XHR for progress ----------
 
-    function displayResponse(response, data) {
-      responseContainer.classList.remove('hidden');
+    els.uploadBtn.addEventListener('click', () => {
+      const userId = currentUserId();
+      if (!userId || !selectedFile) return;
 
-      const statusClass = response.ok
-        ? response.status === 201 ? 'bg-green-500/20 border border-green-500/50 text-green-200'
-          : 'bg-blue-500/20 border border-blue-500/50 text-blue-200'
-        : 'bg-red-500/20 border border-red-500/50 text-red-200';
+      const formData = new FormData();
+      formData.append('file', selectedFile);
 
-      responseStatus.className = `px-4 py-3 rounded-lg font-mono text-sm ${statusClass}`;
-      responseStatus.textContent = `HTTP ${response.status} ${response.statusText}`;
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/v1/avatars');
+      xhr.setRequestHeader('X-User-ID', userId);
 
-      if (typeof data === 'object') {
-        responseJson.textContent = JSON.stringify(data, null, 2);
-      } else {
-        responseJson.textContent = data;
-      }
+      els.progressWrap.classList.remove('hidden');
+      els.progressBar.style.width = '0%';
+      els.progressPct.textContent = '0%';
+      els.uploadBtn.disabled = true;
 
-      if (!response.ok) {
-        showError(`Request failed: ${response.status} ${response.statusText}`);
-      }
-    }
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          els.progressBar.style.width = `${pct}%`;
+          els.progressPct.textContent = `${pct}%`;
+        }
+      };
 
-    function showError(message) {
-      errorMessage.textContent = message;
-      errorMessage.classList.remove('hidden');
-    }
+      xhr.onload = () => {
+        const body = safeParse(xhr.responseText);
+        showResponse(xhr.status, body);
+        els.uploadBtn.disabled = false;
+        // Reset selection after a brief delay so user sees the success state.
+        setTimeout(() => {
+          els.progressWrap.classList.add('hidden');
+          if (xhr.status >= 200 && xhr.status < 300) {
+            selectedFile = null;
+            els.fileInput.value = '';
+            els.previewImg.classList.add('hidden');
+            els.dropPrompt.classList.remove('hidden');
+            els.uploadBtn.disabled = true;
+            refreshCurrent();
+            refreshGallery();
+          }
+        }, 400);
+      };
 
-    function hideError() {
-      errorMessage.classList.add('hidden');
-    }
+      xhr.onerror = () => {
+        showResponse(0, 'Network error');
+        els.progressWrap.classList.add('hidden');
+        els.uploadBtn.disabled = false;
+      };
 
-    function hideResponse() {
-      responseContainer.classList.add('hidden');
-    }
+      xhr.send(formData);
+    });
+
+    // ---------- Init ----------
+
+    (function init() {
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved) els.userId.value = saved;
+      syncUserUI();
+    })();
   </script>
 </body>
 

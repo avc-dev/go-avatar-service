@@ -8,15 +8,36 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
+	handleravatar "github.com/avc-dev/go-avatar-service/internal/handlers/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/logger"
+	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
+	svcavatar "github.com/avc-dev/go-avatar-service/internal/services/avatar"
+	"github.com/avc-dev/go-avatar-service/internal/storage"
 )
+
+// startupProbeTimeout caps both the Postgres Ping and the MinIO EnsureBucket
+// calls performed once at boot. The intent is fail-fast: if the dependency
+// is unreachable, crash on startup with a clear error rather than letting
+// the first inbound request fail mysteriously.
+const startupProbeTimeout = 5 * time.Second
+
+// healthCheckTimeout bounds the total /health probe (across all components).
+const healthCheckTimeout = 5 * time.Second
+
+// staticDir is the on-disk location of the SPA assets served under /web/.
+// Resolved relative to the process working directory; expected to be the repo
+// root for local dev (`make run-server`). Docker images in Iter 5 will pin
+// this via the Dockerfile WORKDIR rather than a config knob.
+const staticDir = "web/static"
 
 func main() {
 	if err := run(); err != nil {
@@ -34,24 +55,65 @@ func run() error {
 	log := logger.New(cfg.Log)
 	slog.SetDefault(log)
 
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Recoverer)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	health := handlers.NewHealthHandler()
-	r.Get("/health", health.Get)
+	// --- Infrastructure ---
+
+	pool, err := pgxpool.New(ctx, cfg.Postgres.DSN)
+	if err != nil {
+		return fmt.Errorf("create pg pool: %w", err)
+	}
+	defer pool.Close()
+
+	if err := probeWithTimeout(ctx, "postgres ping", pool.Ping); err != nil {
+		return err
+	}
+	log.Info("postgres connected", "dsn", redactedDSN(cfg.Postgres.DSN))
+
+	minioStore, err := storage.NewMinIO(storage.Config{
+		Endpoint:  cfg.MinIO.Endpoint,
+		AccessKey: cfg.MinIO.AccessKey,
+		SecretKey: cfg.MinIO.SecretKey,
+		Bucket:    cfg.MinIO.Bucket,
+		UseSSL:    cfg.MinIO.UseSSL,
+	}, log)
+	if err != nil {
+		return fmt.Errorf("create minio client: %w", err)
+	}
+
+	if err := probeWithTimeout(ctx, "ensure minio bucket", minioStore.EnsureBucket); err != nil {
+		return err
+	}
+	log.Info("minio bucket ready", "bucket", cfg.MinIO.Bucket)
+
+	publisher := broker.NewNoOp(log)
+	log.Info("broker: using NoOp publisher (real RabbitMQ wired in Iter 4)")
+
+	// --- Application layer ---
+
+	avatarRepo := repoavatar.NewPostgresRepository(pool)
+	avatarSvc := svcavatar.New(avatarRepo, minioStore, publisher, log)
+	avatarH := handleravatar.NewHandler(avatarSvc, log, cfg.HTTP.MaxUploadBytes)
+
+	healthH := handlers.NewHealthHandler(
+		map[string]handlers.HealthChecker{
+			"postgres": handlers.HealthCheckerFunc(pool.Ping),
+			"minio":    minioStore,
+		},
+		healthCheckTimeout,
+	)
+
+	// --- HTTP server + graceful shutdown ---
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
-		Handler:           r,
+		Handler:           buildRouter(log, healthH, avatarH, staticDir),
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
 		IdleTimeout:       cfg.HTTP.IdleTimeout,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -76,4 +138,33 @@ func run() error {
 	}
 	log.Info("server stopped")
 	return nil
+}
+
+// probeWithTimeout runs a startup probe under a bounded context. label is
+// used only to wrap the resulting error so the failure message names the
+// failing step. parent is the long-lived application context — cancelling it
+// (SIGTERM during boot) also cancels the probe.
+func probeWithTimeout(parent context.Context, label string, probe func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(parent, startupProbeTimeout)
+	defer cancel()
+	if err := probe(ctx); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	return nil
+}
+
+// redactedDSN strips credentials from a Postgres DSN for safe logging. Only
+// the userinfo segment is replaced; scheme, host, port, db, and query params
+// are preserved.
+func redactedDSN(dsn string) string {
+	i := strings.Index(dsn, "://")
+	if i < 0 {
+		return dsn
+	}
+	rest := dsn[i+3:]
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
+		return dsn
+	}
+	return dsn[:i+3] + "***@" + rest[at+1:]
 }

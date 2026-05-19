@@ -5,10 +5,16 @@ issue-845-fix: true
 mockname: "Mock{{.InterfaceName}}"
 filename: "mock_{{.InterfaceName | snakecase}}.go"
 outpkg: mocks
-dir: "internal/services/avatar/mocks"
 packages:
   github.com/avc-dev/go-avatar-service/internal/services/avatar:
+    config:
+      dir: "internal/services/avatar/mocks"
     interfaces:
       AvatarRepository:
       ObjectStorage:
       EventPublisher:
+  github.com/avc-dev/go-avatar-service/internal/handlers/avatar:
+    config:
+      dir: "internal/handlers/avatar/mocks"
+    interfaces:
+      AvatarService:
