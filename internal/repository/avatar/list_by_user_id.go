@@ -20,7 +20,7 @@ func (r *PostgresRepository) ListByUserID(ctx context.Context, userID uuid.UUID)
 
 	rows, err := r.pool.Query(ctx, query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("query avatars by user: %w", err)
+		return nil, fmt.Errorf("list avatars for user %s: %w", userID, err)
 	}
 	defer rows.Close()
 
@@ -28,12 +28,12 @@ func (r *PostgresRepository) ListByUserID(ctx context.Context, userID uuid.UUID)
 	for rows.Next() {
 		a, err := scanAvatar(rows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list avatars for user %s: %w", userID, err)
 		}
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate avatars: %w", err)
+		return nil, fmt.Errorf("list avatars for user %s: %w", userID, err)
 	}
 	return out, nil
 }

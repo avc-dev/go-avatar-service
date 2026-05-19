@@ -29,10 +29,10 @@ func (r *PostgresRepository) UpdateProcessingStatus(
 
 	tag, err := r.pool.Exec(ctx, query, id, string(status), thumbsJSON)
 	if err != nil {
-		return fmt.Errorf("update processing status: %w", err)
+		return fmt.Errorf("update processing status for avatar %s: %w", id, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return fmt.Errorf("update processing status for avatar %s: %w", id, ErrNotFound)
 	}
 	return nil
 }

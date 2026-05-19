@@ -14,10 +14,10 @@ func (r *PostgresRepository) SoftDelete(ctx context.Context, id uuid.UUID) error
 
 	tag, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("soft delete avatar: %w", err)
+		return fmt.Errorf("soft delete avatar %s: %w", id, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return fmt.Errorf("soft delete avatar %s: %w", id, ErrNotFound)
 	}
 	return nil
 }

@@ -41,7 +41,7 @@ func scanAvatar(row rowScanner) (*domain.Avatar, error) {
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, fmt.Errorf("scan avatar: %w", ErrNotFound)
 		}
 		return nil, fmt.Errorf("scan avatar: %w", err)
 	}

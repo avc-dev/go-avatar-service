@@ -2,6 +2,7 @@ package avatar
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -17,5 +18,9 @@ func (r *PostgresRepository) GetCurrentByUserID(ctx context.Context, userID uuid
 		ORDER BY created_at DESC
 		LIMIT 1`
 	row := r.pool.QueryRow(ctx, query, userID)
-	return scanAvatar(row)
+	a, err := scanAvatar(row)
+	if err != nil {
+		return nil, fmt.Errorf("get current avatar for user %s: %w", userID, err)
+	}
+	return a, nil
 }

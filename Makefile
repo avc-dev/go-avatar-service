@@ -25,6 +25,9 @@ test: ## Run tests
 lint: ## Run linter (placeholder until golangci-lint is configured)
 	go vet ./...
 
+mocks: ## Regenerate test mocks via mockery
+	mockery
+
 up: ## Start docker stack (postgres + minio + rabbitmq)
 	docker compose up -d
 
