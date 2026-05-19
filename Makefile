@@ -38,7 +38,7 @@ ps: ## Show docker stack status
 	docker compose ps
 
 migrate-up: ## Apply DB migrations
-	@echo "migrate-up not implemented yet"
+	migrate -path migrations -database "$(POSTGRES_DSN)" up
 
-migrate-down: ## Rollback DB migrations
-	@echo "migrate-down not implemented yet"
+migrate-down: ## Rollback last DB migration
+	migrate -path migrations -database "$(POSTGRES_DSN)" down 1
