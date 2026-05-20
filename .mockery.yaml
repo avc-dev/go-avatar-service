@@ -18,3 +18,10 @@ packages:
       dir: "internal/handlers/avatar/mocks"
     interfaces:
       AvatarService:
+  github.com/avc-dev/go-avatar-service/internal/worker/avatar:
+    config:
+      dir: "internal/worker/avatar/mocks"
+    interfaces:
+      Repository:
+      Storage:
+      ImageResizer:

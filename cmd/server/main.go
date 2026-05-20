@@ -87,19 +87,28 @@ func run() error {
 	}
 	log.Info("minio bucket ready", "bucket", cfg.MinIO.Bucket)
 
-	publisher := broker.NewNoOp(log)
-	log.Info("broker: using NoOp publisher (real RabbitMQ wired in Iter 4)")
+	rmq, err := broker.NewRabbitMQ(cfg.RabbitMQ.URL, log)
+	if err != nil {
+		return fmt.Errorf("create rabbitmq client: %w", err)
+	}
+	defer func() {
+		if cerr := rmq.Close(); cerr != nil {
+			log.Warn("rabbitmq close", "err", cerr)
+		}
+	}()
+	log.Info("rabbitmq connected", "url", redactedAMQPURL(cfg.RabbitMQ.URL))
 
 	// --- Application layer ---
 
 	avatarRepo := repoavatar.NewPostgresRepository(pool)
-	avatarSvc := svcavatar.New(avatarRepo, minioStore, publisher, log)
+	avatarSvc := svcavatar.New(avatarRepo, minioStore, rmq, log)
 	avatarH := handleravatar.NewHandler(avatarSvc, log, cfg.HTTP.MaxUploadBytes)
 
 	healthH := handlers.NewHealthHandler(
 		map[string]handlers.HealthChecker{
 			"postgres": handlers.HealthCheckerFunc(pool.Ping),
 			"minio":    minioStore,
+			"rabbitmq": rmq,
 		},
 		healthCheckTimeout,
 	)
@@ -157,14 +166,23 @@ func probeWithTimeout(parent context.Context, label string, probe func(context.C
 // the userinfo segment is replaced; scheme, host, port, db, and query params
 // are preserved.
 func redactedDSN(dsn string) string {
-	i := strings.Index(dsn, "://")
+	return redactScheme(dsn)
+}
+
+// redactedAMQPURL strips userinfo from an amqp:// URL for safe logging.
+func redactedAMQPURL(url string) string {
+	return redactScheme(url)
+}
+
+func redactScheme(u string) string {
+	i := strings.Index(u, "://")
 	if i < 0 {
-		return dsn
+		return u
 	}
-	rest := dsn[i+3:]
+	rest := u[i+3:]
 	at := strings.LastIndex(rest, "@")
 	if at < 0 {
-		return dsn
+		return u
 	}
-	return dsn[:i+3] + "***@" + rest[at+1:]
+	return u[:i+3] + "***@" + rest[at+1:]
 }
