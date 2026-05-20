@@ -26,6 +26,11 @@ type rowScanner interface {
 
 // scanAvatar materialises an Avatar from a single result row, mapping JSONB
 // thumbnails and translating pgx.ErrNoRows into ErrNotFound.
+//
+// scanAvatar deliberately returns sentinels and raw scan errors *unwrapped*
+// — every caller already adds operation-level context (e.g. "get avatar by
+// id X: ..."), so wrapping here would just produce noisy stacks like
+// "get avatar by id X: scan avatar: avatar not found" with no extra signal.
 func scanAvatar(row rowScanner) (*domain.Avatar, error) {
 	var (
 		a          domain.Avatar
@@ -41,9 +46,9 @@ func scanAvatar(row rowScanner) (*domain.Avatar, error) {
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("scan avatar: %w", ErrNotFound)
+			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("scan avatar: %w", err)
+		return nil, err
 	}
 	a.UploadStatus = domain.UploadStatus(uploadStr)
 	a.ProcessingStatus = domain.ProcessingStatus(processStr)

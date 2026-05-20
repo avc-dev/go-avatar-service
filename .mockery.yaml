@@ -10,14 +10,14 @@ packages:
     config:
       dir: "internal/services/avatar/mocks"
     interfaces:
-      AvatarRepository:
+      Repository:
       ObjectStorage:
       EventPublisher:
   github.com/avc-dev/go-avatar-service/internal/handlers/avatar:
     config:
       dir: "internal/handlers/avatar/mocks"
     interfaces:
-      AvatarService:
+      Service:
   github.com/avc-dev/go-avatar-service/internal/worker/avatar:
     config:
       dir: "internal/worker/avatar/mocks"

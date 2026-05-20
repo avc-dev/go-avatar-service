@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
@@ -23,12 +23,6 @@ import (
 	svcavatar "github.com/avc-dev/go-avatar-service/internal/services/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 )
-
-// startupProbeTimeout caps both the Postgres Ping and the MinIO EnsureBucket
-// calls performed once at boot. The intent is fail-fast: if the dependency
-// is unreachable, crash on startup with a clear error rather than letting
-// the first inbound request fail mysteriously.
-const startupProbeTimeout = 5 * time.Second
 
 // healthCheckTimeout bounds the total /health probe (across all components).
 const healthCheckTimeout = 5 * time.Second
@@ -66,10 +60,10 @@ func run() error {
 	}
 	defer pool.Close()
 
-	if err := probeWithTimeout(ctx, "postgres ping", pool.Ping); err != nil {
+	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "postgres ping", pool.Ping); err != nil {
 		return err
 	}
-	log.Info("postgres connected", "dsn", redactedDSN(cfg.Postgres.DSN))
+	log.Info("postgres connected", "dsn", bootutil.RedactURL(cfg.Postgres.DSN))
 
 	minioStore, err := storage.NewMinIO(storage.Config{
 		Endpoint:  cfg.MinIO.Endpoint,
@@ -82,7 +76,7 @@ func run() error {
 		return fmt.Errorf("create minio client: %w", err)
 	}
 
-	if err := probeWithTimeout(ctx, "ensure minio bucket", minioStore.EnsureBucket); err != nil {
+	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "ensure minio bucket", minioStore.EnsureBucket); err != nil {
 		return err
 	}
 	log.Info("minio bucket ready", "bucket", cfg.MinIO.Bucket)
@@ -96,7 +90,7 @@ func run() error {
 			log.Warn("rabbitmq close", "err", cerr)
 		}
 	}()
-	log.Info("rabbitmq connected", "url", redactedAMQPURL(cfg.RabbitMQ.URL))
+	log.Info("rabbitmq connected", "url", bootutil.RedactURL(cfg.RabbitMQ.URL))
 
 	// --- Application layer ---
 
@@ -147,42 +141,4 @@ func run() error {
 	}
 	log.Info("server stopped")
 	return nil
-}
-
-// probeWithTimeout runs a startup probe under a bounded context. label is
-// used only to wrap the resulting error so the failure message names the
-// failing step. parent is the long-lived application context — cancelling it
-// (SIGTERM during boot) also cancels the probe.
-func probeWithTimeout(parent context.Context, label string, probe func(context.Context) error) error {
-	ctx, cancel := context.WithTimeout(parent, startupProbeTimeout)
-	defer cancel()
-	if err := probe(ctx); err != nil {
-		return fmt.Errorf("%s: %w", label, err)
-	}
-	return nil
-}
-
-// redactedDSN strips credentials from a Postgres DSN for safe logging. Only
-// the userinfo segment is replaced; scheme, host, port, db, and query params
-// are preserved.
-func redactedDSN(dsn string) string {
-	return redactScheme(dsn)
-}
-
-// redactedAMQPURL strips userinfo from an amqp:// URL for safe logging.
-func redactedAMQPURL(url string) string {
-	return redactScheme(url)
-}
-
-func redactScheme(u string) string {
-	i := strings.Index(u, "://")
-	if i < 0 {
-		return u
-	}
-	rest := u[i+3:]
-	at := strings.LastIndex(rest, "@")
-	if at < 0 {
-		return u
-	}
-	return u[:i+3] + "***@" + rest[at+1:]
 }

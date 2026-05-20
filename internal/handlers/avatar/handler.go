@@ -1,7 +1,7 @@
 // Package avatar contains the HTTP handler layer for the avatar aggregate.
 //
-// The package defines a consumer-side AvatarService interface that lists
-// exactly the service methods the HTTP layer needs. The concrete
+// The package defines a consumer-side Service interface that lists exactly
+// the service methods the HTTP layer needs. The concrete
 // *services/avatar.Service satisfies this interface structurally — handlers
 // stay decoupled from extra service methods they don't use and the mock can
 // be precisely scoped for handler tests.
@@ -41,10 +41,15 @@ func parseUserIDPath(raw string) (uuid.UUID, error) {
 	return id, nil
 }
 
-// AvatarService is the consumer-side contract the handler depends on. Only
-// the methods called by handlers appear here so the generated mock is precise
+// Service is the consumer-side contract the handler depends on. Only the
+// methods called by handlers appear here so the generated mock is precise
 // and unused service surface area does not leak into HTTP tests.
-type AvatarService interface {
+//
+// The name matches the consumer-side convention used elsewhere in the project
+// (storage.Storage, broker.Publisher, repository/avatar.Repository): no
+// stuttering aggregate prefix — within the handlers/avatar package, "Service"
+// is unambiguous.
+type Service interface {
 	Upload(ctx context.Context, p svcavatar.UploadParams) (*domain.Avatar, error)
 	GetMetadata(ctx context.Context, id uuid.UUID) (*domain.Avatar, error)
 	DownloadOriginal(ctx context.Context, id uuid.UUID) (*svcavatar.DownloadResult, error)
@@ -59,7 +64,7 @@ type AvatarService interface {
 // endpoints. Construct with NewHandler; mount per-method handlers on a chi
 // router in cmd/server.
 type Handler struct {
-	svc            AvatarService
+	svc            Service
 	log            *slog.Logger
 	maxUploadBytes int64
 }
@@ -67,7 +72,7 @@ type Handler struct {
 // NewHandler builds a Handler. maxUploadBytes caps the multipart body size
 // for the upload endpoint via http.MaxBytesReader; it is also echoed back to
 // the client in the 413 response so the UI can show a meaningful limit.
-func NewHandler(svc AvatarService, log *slog.Logger, maxUploadBytes int64) *Handler {
+func NewHandler(svc Service, log *slog.Logger, maxUploadBytes int64) *Handler {
 	return &Handler{
 		svc:            svc,
 		log:            log,

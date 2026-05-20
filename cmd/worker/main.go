@@ -7,13 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/imageproc"
@@ -22,10 +21,6 @@ import (
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 	workeravatar "github.com/avc-dev/go-avatar-service/internal/worker/avatar"
 )
-
-// startupProbeTimeout matches cmd/server: fail-fast on dependency unavailability
-// at boot rather than letting the first message error out cryptically.
-const startupProbeTimeout = 5 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -54,10 +49,10 @@ func run() error {
 	}
 	defer pool.Close()
 
-	if err := probeWithTimeout(ctx, "postgres ping", pool.Ping); err != nil {
+	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "postgres ping", pool.Ping); err != nil {
 		return err
 	}
-	log.Info("postgres connected", "dsn", redactedDSN(cfg.Postgres.DSN))
+	log.Info("postgres connected", "dsn", bootutil.RedactURL(cfg.Postgres.DSN))
 
 	minioStore, err := storage.NewMinIO(storage.Config{
 		Endpoint:  cfg.MinIO.Endpoint,
@@ -69,7 +64,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create minio client: %w", err)
 	}
-	if err := probeWithTimeout(ctx, "ensure minio bucket", minioStore.EnsureBucket); err != nil {
+	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "ensure minio bucket", minioStore.EnsureBucket); err != nil {
 		return err
 	}
 	log.Info("minio bucket ready", "bucket", cfg.MinIO.Bucket)
@@ -83,7 +78,7 @@ func run() error {
 			log.Warn("rabbitmq close", "err", cerr)
 		}
 	}()
-	log.Info("rabbitmq connected", "url", redactedAMQPURL(cfg.RabbitMQ.URL))
+	log.Info("rabbitmq connected", "url", bootutil.RedactURL(cfg.RabbitMQ.URL))
 
 	// --- Worker ---
 
@@ -134,41 +129,4 @@ func run() error {
 	wg.Wait()
 	log.Info("worker stopped")
 	return nil
-}
-
-// probeWithTimeout — duplicated from cmd/server intentionally. Extracting to
-// a shared package (e.g. internal/bootutil) is worth it when we add the 3rd
-// binary, not for two callers.
-func probeWithTimeout(parent context.Context, label string, probe func(context.Context) error) error {
-	ctx, cancel := context.WithTimeout(parent, startupProbeTimeout)
-	defer cancel()
-	if err := probe(ctx); err != nil {
-		return fmt.Errorf("%s: %w", label, err)
-	}
-	return nil
-}
-
-// redactedDSN — same shape as in cmd/server, kept local to avoid premature
-// extraction. Strips userinfo from a Postgres DSN for safe logging.
-func redactedDSN(dsn string) string {
-	return redactScheme(dsn)
-}
-
-// redactedAMQPURL strips userinfo from an amqp:// URL. AMQP credentials are
-// usually guest/guest in dev but never something we want printed in prod logs.
-func redactedAMQPURL(url string) string {
-	return redactScheme(url)
-}
-
-func redactScheme(u string) string {
-	i := strings.Index(u, "://")
-	if i < 0 {
-		return u
-	}
-	rest := u[i+3:]
-	at := strings.LastIndex(rest, "@")
-	if at < 0 {
-		return u
-	}
-	return u[:i+3] + "***@" + rest[at+1:]
 }

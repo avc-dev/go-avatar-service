@@ -24,6 +24,7 @@ type Repository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Avatar, error)
 	GetCurrentByUserID(ctx context.Context, userID uuid.UUID) (*domain.Avatar, error)
 	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.Avatar, error)
+	ClaimForProcessing(ctx context.Context, id uuid.UUID) (*domain.Avatar, error)
 	UpdateProcessingStatus(ctx context.Context, id uuid.UUID, status domain.ProcessingStatus, thumbs map[string]string) error
 	SoftDelete(ctx context.Context, id uuid.UUID) error
 	DeleteByOwner(ctx context.Context, id, requestingUserID uuid.UUID) (*domain.Avatar, error)

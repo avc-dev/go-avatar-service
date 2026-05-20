@@ -17,7 +17,11 @@ import (
 	"image"
 	"io"
 
-	// Register stdlib decoders we accept on input.
+	// Register stdlib decoders we accept on input. Keep this list in sync with
+	// the upload whitelist in internal/handlers/avatar/sniff.go — accepting an
+	// upload type whose decoder is not registered here would cause the worker
+	// to fail on every thumbnail run for that format.
+	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 

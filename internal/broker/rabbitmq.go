@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -19,9 +20,17 @@ var _ Publisher = (*RabbitMQ)(nil)
 // The struct holds a long-lived connection plus a dedicated publisher
 // channel. Consumers receive their own freshly-opened channel (see Consume)
 // to keep publisher and consumer flow control independent.
+//
+// pubMu serialises access to pubCh. amqp091-go explicitly forbids concurrent
+// use of a *Channel — under load, two goroutines publishing in parallel
+// interleave AMQP frames and the broker drops the connection. The publisher
+// channel is hot-shared across all HTTP handlers, so the mutex is the
+// minimum-fuss correctness fix. (An alternative would be a small channel
+// pool, but the lock is cheap and publishes are short.)
 type RabbitMQ struct {
 	conn  *amqp.Connection
 	pubCh *amqp.Channel
+	pubMu sync.Mutex
 	log   *slog.Logger
 }
 
@@ -127,10 +136,18 @@ func declareTopology(ch *amqp.Channel) error {
 // are closed unconditionally; the first non-nil error encountered is
 // returned so the caller still learns about a failure without leaking
 // resources.
+//
+// We acquire pubMu briefly before closing the channel so an in-flight
+// PublishWithContext finishes cleanly. In a well-behaved shutdown the HTTP
+// server has already drained, but layering the lock here keeps the invariant
+// "pubCh is closed only when no publish is running" easy to reason about.
 func (r *RabbitMQ) Close() error {
 	var firstErr error
 	if r.pubCh != nil {
-		if err := r.pubCh.Close(); err != nil && !errors.Is(err, amqp.ErrClosed) {
+		r.pubMu.Lock()
+		err := r.pubCh.Close()
+		r.pubMu.Unlock()
+		if err != nil && !errors.Is(err, amqp.ErrClosed) {
 			firstErr = fmt.Errorf("broker: close publisher channel: %w", err)
 		}
 	}

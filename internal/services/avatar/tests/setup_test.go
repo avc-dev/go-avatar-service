@@ -14,12 +14,12 @@ import (
 // met when the test ends.
 func newService(t *testing.T) (
 	*avatar.Service,
-	*mocks.MockAvatarRepository,
+	*mocks.MockRepository,
 	*mocks.MockObjectStorage,
 	*mocks.MockEventPublisher,
 ) {
 	t.Helper()
-	repo := mocks.NewMockAvatarRepository(t)
+	repo := mocks.NewMockRepository(t)
 	st := mocks.NewMockObjectStorage(t)
 	pub := mocks.NewMockEventPublisher(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -22,11 +22,11 @@ func anyCtx() interface{} { return mock.Anything }
 // without allocating MBs of fake payload.
 const testMaxUploadBytes int64 = 1024
 
-// newHandler builds a Handler wired with a fresh MockAvatarService. The mock
+// newHandler builds a Handler wired with a fresh MockService. The mock
 // registers a cleanup hook asserting all expectations were met.
-func newHandler(t *testing.T) (*avatar.Handler, *mocks.MockAvatarService) {
+func newHandler(t *testing.T) (*avatar.Handler, *mocks.MockService) {
 	t.Helper()
-	svc := mocks.NewMockAvatarService(t)
+	svc := mocks.NewMockService(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return avatar.NewHandler(svc, log, testMaxUploadBytes), svc
 }

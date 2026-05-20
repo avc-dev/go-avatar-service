@@ -16,8 +16,16 @@ import (
 )
 
 // HandleUploaded processes one AvatarUploadEvent: validates the message,
-// guards idempotency via the persisted processing_status, generates thumbnails
-// via the image resizer, and updates the DB status to completed or failed.
+// claims the avatar atomically (idempotency gate), generates thumbnails via
+// the image resizer, and updates the DB status to completed or failed.
+//
+// Idempotency is enforced by a single conditional UPDATE in the repository
+// (ClaimForProcessing): only a row whose processing_status is exactly
+// 'pending' is moved to 'processing' and returned. A duplicate delivery
+// races against the same row and at most one worker wins — the loser sees
+// ErrNotFound and acks without doing work. This collapses two previously
+// separate steps ("read state" + "mark processing") into one TOCTOU-free
+// operation.
 //
 // Signature matches broker.Handler so the consumer loop can route deliveries
 // directly to this method without an adapter.
@@ -28,57 +36,35 @@ func (w *Worker) HandleUploaded(ctx context.Context, body []byte, messageID stri
 		return fmt.Errorf("worker: unmarshal upload event (msg %s): %w", messageID, err)
 	}
 
-	// 1. Read current state — also our idempotency gate.
+	// Atomic claim: either we own the row now (status=processing) or
+	// somebody else already claimed/finished it (or it's gone). Both
+	// non-actionable cases collapse to ErrNotFound.
 	var avatar *domain.Avatar
-	if err := withRetry(ctx, w.log, w.retryDelays, "get avatar",
+	if err := withRetry(ctx, w.log, w.retryDelays, "claim avatar",
 		func(c context.Context) error {
-			var getErr error
-			avatar, getErr = w.repo.GetByID(c, event.AvatarID)
-			return getErr
+			var claimErr error
+			avatar, claimErr = w.repo.ClaimForProcessing(c, event.AvatarID)
+			return claimErr
 		},
 	); err != nil {
 		if errors.Is(err, repoavatar.ErrNotFound) {
-			// Avatar was hard-deleted (or never persisted) before we got here.
-			// The event is stale; ack so it doesn't loop forever.
-			w.log.Info("worker: upload event for missing avatar, skipping",
+			w.log.Info("worker: upload event not actionable (missing or already claimed)",
 				"avatar_id", event.AvatarID, "message_id", messageID)
 			return nil
 		}
 		return err
 	}
 
-	// 2. Idempotency: skip if not pending.
-	switch avatar.ProcessingStatus {
-	case domain.ProcessingStatusPending:
-		// Fall through to processing.
-	case domain.ProcessingStatusProcessing,
-		domain.ProcessingStatusCompleted,
-		domain.ProcessingStatusFailed:
-		w.log.Info("worker: upload event already handled, skipping",
-			"avatar_id", event.AvatarID,
-			"status", avatar.ProcessingStatus,
-			"message_id", messageID)
-		return nil
-	default:
-		// An unknown status value is a programmer error: the DB CHECK constraint
-		// rules it out. Surface loudly via DLX.
-		return fmt.Errorf("worker: unknown processing status %q for avatar %s",
-			avatar.ProcessingStatus, event.AvatarID)
-	}
-
-	// 3. Move status to processing (claims the work for this worker).
-	if err := withRetry(ctx, w.log, w.retryDelays, "mark processing",
-		func(c context.Context) error {
-			return w.repo.UpdateProcessingStatus(c, event.AvatarID, domain.ProcessingStatusProcessing, nil)
-		},
-	); err != nil {
-		return fmt.Errorf("worker: claim avatar %s: %w", event.AvatarID, err)
-	}
-
-	// 4. Do the heavy lifting; on any failure, do a best-effort mark-as-failed.
-	thumbs, err := w.generateThumbnails(ctx, event.AvatarID, event.S3Key)
+	// Use the S3 key from the claimed row, not the event body — the DB is the
+	// source of truth, and using it here means a malformed (but well-typed)
+	// event with a forged S3 key cannot redirect us to a different object.
+	//
+	// generateThumbnails returns the partial map of thumbnails it managed to
+	// upload before the failure, so markFailed can best-effort-delete them and
+	// avoid leaving orphans in S3 for the operator to chase down later.
+	thumbs, err := w.generateThumbnails(ctx, event.AvatarID, avatar.S3Key)
 	if err != nil {
-		w.markFailed(ctx, event.AvatarID, err)
+		w.markFailed(ctx, event.AvatarID, thumbs, err)
 		return fmt.Errorf("worker: generate thumbnails for avatar %s: %w", event.AvatarID, err)
 	}
 
@@ -103,7 +89,14 @@ func (w *Worker) HandleUploaded(ctx context.Context, body []byte, messageID stri
 
 // generateThumbnails downloads the original, then for each configured size
 // produces a JPEG thumbnail and uploads it to S3 under thumbnails/{id}/{size}.jpg.
-// Returns a map suitable for repo.UpdateProcessingStatus.
+//
+// Return contract on failure:
+//   - The returned map contains every thumbnail that was successfully uploaded
+//     to S3 *before* the failure. Callers (specifically markFailed) use this
+//     to best-effort-delete those orphans so we don't accumulate garbage in
+//     object storage between failed runs.
+//   - On full success the map has one entry per configured thumbnail size and
+//     err is nil.
 func (w *Worker) generateThumbnails(ctx context.Context, avatarID uuid.UUID, s3Key string) (map[string]string, error) {
 	// Download original (with retry).
 	var (
@@ -133,12 +126,14 @@ func (w *Worker) generateThumbnails(ctx context.Context, avatarID uuid.UUID, s3K
 	w.log.Debug("worker: original downloaded", "s3_key", s3Key, "size", downloadSize)
 
 	// Resize + upload per size. Resize is deterministic and CPU-bound, so it
-	// runs without retry; only the upload retries.
+	// runs without retry; only the upload retries. The map accumulates
+	// successfully-uploaded keys as we go, so a mid-loop failure can hand
+	// back the partial set for cleanup.
 	thumbs := make(map[string]string, len(w.thumbSizes))
 	for _, size := range w.thumbSizes {
 		jpegBytes, err := w.resizer.ResizeToJPEG(ctx, bytes.NewReader(original), size.Width, size.Height, jpegQuality)
 		if err != nil {
-			return nil, fmt.Errorf("resize %s: %w", size.Name, err)
+			return thumbs, fmt.Errorf("resize %s: %w", size.Name, err)
 		}
 
 		thumbKey := fmt.Sprintf("thumbnails/%s/%s.jpg", avatarID, size.Name)
@@ -147,7 +142,7 @@ func (w *Worker) generateThumbnails(ctx context.Context, avatarID uuid.UUID, s3K
 				return w.storage.Upload(c, thumbKey, bytes.NewReader(jpegBytes), int64(len(jpegBytes)), "image/jpeg")
 			},
 		); uploadErr != nil {
-			return nil, fmt.Errorf("upload thumbnail %s: %w", thumbKey, uploadErr)
+			return thumbs, fmt.Errorf("upload thumbnail %s: %w", thumbKey, uploadErr)
 		}
 		thumbs[size.Name] = thumbKey
 	}
@@ -155,16 +150,37 @@ func (w *Worker) generateThumbnails(ctx context.Context, avatarID uuid.UUID, s3K
 	return thumbs, nil
 }
 
-// markFailed is a best-effort transition to ProcessingStatusFailed used in
-// error paths. Its own failure is logged but not propagated — the caller will
-// already be returning the original error to the consumer.
-func (w *Worker) markFailed(ctx context.Context, avatarID uuid.UUID, cause error) {
-	// Use a fresh context for the mark — even if the original was cancelled
-	// (e.g. graceful shutdown), we want one last attempt to record the state.
-	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+// markFailed is a best-effort failure path. It does two things, neither of
+// which is allowed to mask the original cause:
+//  1. Delete any thumbnail objects that were uploaded before the failure
+//     (partialThumbs) so we don't leave orphans in S3 for a future operator
+//     or reconciliation job to chase down.
+//  2. Transition the DB row to ProcessingStatusFailed so observers (the
+//     web UI, future re-processing scripts) can see the terminal state.
+//
+// All errors are logged at ERROR but not propagated — the caller is already
+// returning the underlying cause to the consumer, which will route the
+// message to the DLX for inspection.
+func (w *Worker) markFailed(ctx context.Context, avatarID uuid.UUID, partialThumbs map[string]string, cause error) {
+	// Use a fresh context for both cleanup and the status mark — the original
+	// may be cancelled (e.g. graceful shutdown), and we want one last attempt
+	// at each side effect.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
-	if err := w.repo.UpdateProcessingStatus(markCtx, avatarID, domain.ProcessingStatusFailed, nil); err != nil {
+	for size, key := range partialThumbs {
+		if err := w.storage.Delete(cleanupCtx, key); err != nil {
+			// Best-effort: a leaked thumbnail is annoying but not fatal, and
+			// retrying it here would block status persistence below.
+			w.log.Warn("worker: failed to clean up partial thumbnail on failure path",
+				"avatar_id", avatarID,
+				"size", size,
+				"s3_key", key,
+				"err", err)
+		}
+	}
+
+	if err := w.repo.UpdateProcessingStatus(cleanupCtx, avatarID, domain.ProcessingStatusFailed, nil); err != nil {
 		w.log.Error("worker: failed to mark avatar as failed",
 			"avatar_id", avatarID,
 			"cause", cause,

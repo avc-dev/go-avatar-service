@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/avc-dev/go-avatar-service/internal/httpx"
@@ -50,19 +51,47 @@ type healthResponse struct {
 }
 
 // Get implements GET /health.
+//
+// Checkers run in parallel under a shared deadline so total latency is
+// bounded by the slowest component rather than the sum of all components.
+// Each goroutine writes its outcome into a fixed slot of the results slice;
+// no shared map mutation is needed and the WaitGroup guarantees every slot
+// is populated before we serialise the response.
 func (h *HealthHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), h.timeout)
 	defer cancel()
 
-	components := make(map[string]string, len(h.checkers))
-	allOK := true
+	type result struct {
+		name   string
+		status string
+	}
+
+	results := make([]result, len(h.checkers))
+	var wg sync.WaitGroup
+	idx := 0
 	for name, c := range h.checkers {
-		if err := c.Check(ctx); err != nil {
-			components[name] = "error: " + err.Error()
+		wg.Add(1)
+		// Capture name+c+idx in the closure args, not the loop vars, so each
+		// goroutine writes to its own slot regardless of iteration order.
+		go func(i int, name string, c HealthChecker) {
+			defer wg.Done()
+			if err := c.Check(ctx); err != nil {
+				results[i] = result{name: name, status: "error: " + err.Error()}
+				return
+			}
+			results[i] = result{name: name, status: "ok"}
+		}(idx, name, c)
+		idx++
+	}
+	wg.Wait()
+
+	components := make(map[string]string, len(results))
+	allOK := true
+	for _, r := range results {
+		components[r.name] = r.status
+		if r.status != "ok" {
 			allOK = false
-			continue
 		}
-		components[name] = "ok"
 	}
 
 	status := http.StatusOK

@@ -61,7 +61,7 @@ const jpegQuality = 85
 // Repository is the persistence dependency. Only the methods the worker
 // actually calls are declared.
 type Repository interface {
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Avatar, error)
+	ClaimForProcessing(ctx context.Context, id uuid.UUID) (*domain.Avatar, error)
 	UpdateProcessingStatus(ctx context.Context, id uuid.UUID, status domain.ProcessingStatus, thumbs map[string]string) error
 }
 

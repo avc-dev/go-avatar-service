@@ -2,7 +2,7 @@
 // aggregate: orchestration of object storage, persistence, and event
 // publishing into the user-facing operations.
 //
-// Dependency interfaces (AvatarRepository, ObjectStorage, EventPublisher) are
+// Dependency interfaces (Repository, ObjectStorage, EventPublisher) are
 // declared here on the consumer side: the package owns the contract it needs,
 // and concrete implementations from other packages satisfy it via Go's
 // structural typing.
@@ -27,9 +27,10 @@ var (
 	ErrForbidden = errors.New("forbidden")
 )
 
-// AvatarRepository is the persistence dependency. The service uses only these
-// methods.
-type AvatarRepository interface {
+// Repository is the persistence dependency. The service uses only these
+// methods — narrower than the full repository.Repository interface, so the
+// generated mock stays precise and unused methods don't leak into tests.
+type Repository interface {
 	Create(ctx context.Context, a *domain.Avatar) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Avatar, error)
 	GetCurrentByUserID(ctx context.Context, userID uuid.UUID) (*domain.Avatar, error)
@@ -52,14 +53,14 @@ type EventPublisher interface {
 
 // Service orchestrates the avatar domain.
 type Service struct {
-	repo      AvatarRepository
+	repo      Repository
 	storage   ObjectStorage
 	publisher EventPublisher
 	log       *slog.Logger
 }
 
 // New constructs a Service. All dependencies are required.
-func New(repo AvatarRepository, st ObjectStorage, pub EventPublisher, log *slog.Logger) *Service {
+func New(repo Repository, st ObjectStorage, pub EventPublisher, log *slog.Logger) *Service {
 	return &Service{
 		repo:      repo,
 		storage:   st,
