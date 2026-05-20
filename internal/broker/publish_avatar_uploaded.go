@@ -25,7 +25,7 @@ func (n *NoOp) PublishAvatarUploaded(_ context.Context, event domain.AvatarUploa
 // PublishAvatarUploaded JSON-serialises event and publishes it to the
 // project exchange with the avatar.uploaded routing key. Messages are
 // persistent so the queue survives broker restarts; the avatar UUID doubles
-// as MessageId so downstream observability can correlate by it.
+// as MessageId so consumer logs can correlate by it.
 func (r *RabbitMQ) PublishAvatarUploaded(ctx context.Context, event domain.AvatarUploadEvent) error {
 	body, err := json.Marshal(event)
 	if err != nil {

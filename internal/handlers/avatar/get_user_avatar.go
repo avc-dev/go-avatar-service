@@ -14,7 +14,8 @@ import (
 //
 // Two service calls are required: first look up the user's current avatar,
 // then stream its binary. A 404 from the first call is reported as such — a
-// placeholder image is deliberately not served here (deferred to Iter 6).
+// placeholder image is deliberately not served here; the frontend can fall
+// back to a client-side default.
 func (h *Handler) GetUserAvatar(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -49,7 +50,7 @@ func (h *Handler) GetUserAvatar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, status, msg)
 		return
 	}
-	defer result.Reader.Close()
+	defer func() { _ = result.Reader.Close() }()
 
 	w.Header().Set("Content-Type", result.ContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(result.Size, 10))

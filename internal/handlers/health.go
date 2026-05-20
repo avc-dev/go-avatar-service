@@ -26,8 +26,8 @@ func (f HealthCheckerFunc) Check(ctx context.Context) error { return f(ctx) }
 // HealthHandler aggregates per-component checks into the /health endpoint.
 // Components are probed in parallel-friendly order via the same context;
 // each result is reported in the JSON body. The HTTP status is 200 if all
-// components pass and 503 if any fails — the contract k8s readiness probes
-// expect.
+// components pass and 503 if any fails — the contract readiness probes
+// (and most load balancers) expect.
 type HealthHandler struct {
 	checkers map[string]HealthChecker
 	timeout  time.Duration

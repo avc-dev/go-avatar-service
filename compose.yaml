@@ -1,3 +1,36 @@
+# Shared block for the two application services: same image, same env. Each
+# service overrides command/container_name/ports/healthcheck below. Map merging
+# of YAML anchors is well-supported by modern docker compose.
+x-app-base: &app-base
+  image: gophprofile-app:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+  depends_on:
+    postgres:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    migrator:
+      condition: service_completed_successfully
+  environment:
+    # Inside compose, app talks to deps via service names and CONTAINER ports
+    # (not the host-side 5433/5673 mapping we use for `make run-server`).
+    POSTGRES_DSN: postgres://avatars:avatars@postgres:5432/avatars?sslmode=disable
+    MINIO_ENDPOINT: minio:9000
+    MINIO_ACCESS_KEY: minioadmin
+    MINIO_SECRET_KEY: minioadmin
+    MINIO_BUCKET: avatars
+    MINIO_USE_SSL: "false"
+    RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    RABBITMQ_EXCHANGE: avatars.exchange
+    HTTP_PORT: "8080"
+    LOG_LEVEL: info
+    LOG_FORMAT: json
+  restart: unless-stopped
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -50,6 +83,46 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # One-shot service: applies all pending migrations, then exits. The app
+  # services depend on its successful completion before starting. Keeping
+  # migrations as a separate one-shot (rather than baking them into server
+  # startup) makes the deploy story safer once multiple replicas show up.
+  migrator:
+    image: migrate/migrate:v4.18.3
+    container_name: gophprofile-migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://avatars:avatars@postgres:5432/avatars?sslmode=disable"
+      - "up"
+    restart: "no"
+
+  app-server:
+    <<: *app-base
+    container_name: gophprofile-app-server
+    # Uses Dockerfile's CMD (/usr/local/bin/server) — no override needed.
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # busybox wget --spider returns non-zero on non-2xx responses; perfect
+      # for our /health which is 200 (all green) or 503 (degraded).
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  app-worker:
+    <<: *app-base
+    container_name: gophprofile-app-worker
+    command: ["/usr/local/bin/worker"]
+    # No exposed HTTP and no healthcheck — worker exit signals (queue close,
+    # SIGTERM) drive its lifecycle; visibility via container logs.
 
 volumes:
   postgres_data:

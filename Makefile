@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: help run-server run-worker build tidy test lint up down logs ps migrate-up migrate-down
+.PHONY: help run-server run-worker build tidy test test-integration lint mocks up down logs ps migrate-up migrate-down docker-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -19,20 +19,26 @@ build: ## Build server and worker binaries into bin/
 tidy: ## Run go mod tidy
 	go mod tidy
 
-test: ## Run tests
+test: ## Run unit + per-package integration tests (no build tags)
 	go test ./...
 
-lint: ## Run linter (placeholder until golangci-lint is configured)
-	go vet ./...
+test-integration: ## Run the full-stack end-to-end test (testcontainers, ~15-30s)
+	go test -tags=integration -count=1 -v ./tests/...
+
+lint: ## Run golangci-lint (install: brew install golangci-lint OR go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest)
+	golangci-lint run ./...
 
 mocks: ## Regenerate test mocks via mockery
 	mockery
 
-up: ## Start docker stack (postgres + minio + rabbitmq)
+up: ## Start docker stack (postgres + minio + rabbitmq + app-server + app-worker via compose)
 	docker compose up -d
 
 down: ## Stop docker stack
 	docker compose down
+
+docker-build: ## Build the app image without starting anything
+	docker compose build app-server
 
 logs: ## Tail docker stack logs
 	docker compose logs -f

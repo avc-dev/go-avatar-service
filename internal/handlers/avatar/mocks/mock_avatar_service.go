@@ -180,6 +180,66 @@ func (_c *MockAvatarService_DownloadOriginal_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// DownloadThumbnail provides a mock function with given fields: ctx, id, size
+func (_m *MockAvatarService) DownloadThumbnail(ctx context.Context, id uuid.UUID, size string) (*servicesavatar.DownloadResult, error) {
+	ret := _m.Called(ctx, id, size)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DownloadThumbnail")
+	}
+
+	var r0 *servicesavatar.DownloadResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, string) (*servicesavatar.DownloadResult, error)); ok {
+		return rf(ctx, id, size)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, string) *servicesavatar.DownloadResult); ok {
+		r0 = rf(ctx, id, size)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*servicesavatar.DownloadResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID, string) error); ok {
+		r1 = rf(ctx, id, size)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAvatarService_DownloadThumbnail_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DownloadThumbnail'
+type MockAvatarService_DownloadThumbnail_Call struct {
+	*mock.Call
+}
+
+// DownloadThumbnail is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uuid.UUID
+//   - size string
+func (_e *MockAvatarService_Expecter) DownloadThumbnail(ctx interface{}, id interface{}, size interface{}) *MockAvatarService_DownloadThumbnail_Call {
+	return &MockAvatarService_DownloadThumbnail_Call{Call: _e.mock.On("DownloadThumbnail", ctx, id, size)}
+}
+
+func (_c *MockAvatarService_DownloadThumbnail_Call) Run(run func(ctx context.Context, id uuid.UUID, size string)) *MockAvatarService_DownloadThumbnail_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uuid.UUID), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockAvatarService_DownloadThumbnail_Call) Return(_a0 *servicesavatar.DownloadResult, _a1 error) *MockAvatarService_DownloadThumbnail_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAvatarService_DownloadThumbnail_Call) RunAndReturn(run func(context.Context, uuid.UUID, string) (*servicesavatar.DownloadResult, error)) *MockAvatarService_DownloadThumbnail_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCurrentByUserID provides a mock function with given fields: ctx, userID
 func (_m *MockAvatarService) GetCurrentByUserID(ctx context.Context, userID uuid.UUID) (*domain.Avatar, error) {
 	ret := _m.Called(ctx, userID)

@@ -1,6 +1,8 @@
 package avatar
 
 import (
+	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,8 +21,8 @@ type UploadResponse struct {
 
 // MetadataResponse is the 200 body for GET /api/v1/avatars/{id}/metadata and
 // the per-item shape inside ListResponse. Width/height are intentionally
-// omitted for MVP: the schema does not yet store image dimensions; the
-// worker will populate them in Iteration 4.
+// omitted: the schema does not yet store image dimensions and there's no
+// pressing use case for them right now.
 type MetadataResponse struct {
 	ID         uuid.UUID        `json:"id"`
 	UserID     uuid.UUID        `json:"user_id"`
@@ -47,13 +49,19 @@ type ListResponse struct {
 
 // toMetadataResponse converts a domain Avatar into the wire shape. Thumbnails
 // is always a non-nil slice (possibly empty) so json.Marshal emits `[]` rather
-// than `null` for the "no thumbnails yet" case.
+// than `null` for the "no thumbnails yet" case. URLs point back to the Download
+// endpoint with the ?size= query selector — clients use the metadata response
+// as the directory of available variants.
 func toMetadataResponse(a *domain.Avatar) MetadataResponse {
 	thumbs := make([]ThumbnailEntry, 0, len(a.ThumbnailS3Keys))
 	for size := range a.ThumbnailS3Keys {
-		// TODO(iter-4): once a dedicated thumbnail download endpoint exists,
-		// populate URL with e.g. "/api/v1/avatars/{id}?size={size}".
-		thumbs = append(thumbs, ThumbnailEntry{Size: size, URL: ""})
+		// QueryEscape guards against unexpected characters in the map keys —
+		// today they're whitelisted constants but the URL stays well-formed
+		// even if that invariant is ever loosened (e.g. user-defined sizes).
+		thumbs = append(thumbs, ThumbnailEntry{
+			Size: size,
+			URL:  fmt.Sprintf("/api/v1/avatars/%s?size=%s", a.ID, url.QueryEscape(size)),
+		})
 	}
 	return MetadataResponse{
 		ID:         a.ID,

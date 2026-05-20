@@ -48,6 +48,7 @@ type AvatarService interface {
 	Upload(ctx context.Context, p svcavatar.UploadParams) (*domain.Avatar, error)
 	GetMetadata(ctx context.Context, id uuid.UUID) (*domain.Avatar, error)
 	DownloadOriginal(ctx context.Context, id uuid.UUID) (*svcavatar.DownloadResult, error)
+	DownloadThumbnail(ctx context.Context, id uuid.UUID, size string) (*svcavatar.DownloadResult, error)
 	GetCurrentByUserID(ctx context.Context, userID uuid.UUID) (*domain.Avatar, error)
 	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.Avatar, error)
 	Delete(ctx context.Context, id, requestingUserID uuid.UUID) error

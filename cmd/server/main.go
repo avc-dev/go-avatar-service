@@ -35,8 +35,8 @@ const healthCheckTimeout = 5 * time.Second
 
 // staticDir is the on-disk location of the SPA assets served under /web/.
 // Resolved relative to the process working directory; expected to be the repo
-// root for local dev (`make run-server`). Docker images in Iter 5 will pin
-// this via the Dockerfile WORKDIR rather than a config knob.
+// root for local dev (`make run-server`) and /app inside the Docker image
+// (pinned via WORKDIR).
 const staticDir = "web/static"
 
 func main() {

@@ -116,7 +116,7 @@ func (w *Worker) generateThumbnails(ctx context.Context, avatarID uuid.UUID, s3K
 			if err != nil {
 				return err
 			}
-			defer result.Reader.Close()
+			defer func() { _ = result.Reader.Close() }()
 
 			buf, readErr := io.ReadAll(result.Reader)
 			if readErr != nil {

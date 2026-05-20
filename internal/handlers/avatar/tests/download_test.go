@@ -65,4 +65,56 @@ func TestDownload(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, rec.Code)
 		require.Contains(t, rec.Body.String(), "Avatar not found")
 	})
+
+	t.Run("?size=100x100: dispatches to DownloadThumbnail", func(t *testing.T) {
+		h, svc := newHandler(t)
+		id := uuid.Must(uuid.NewV7())
+		payload := "thumb-100"
+		svc.EXPECT().
+			DownloadThumbnail(anyCtx(), id, "100x100").
+			Return(&svcavatar.DownloadResult{
+				Reader:      io.NopCloser(strings.NewReader(payload)),
+				ContentType: "image/jpeg",
+				Size:        int64(len(payload)),
+				Avatar:      &domain.Avatar{ID: id},
+			}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+id.String()+"?size=100x100", nil)
+		rec := serve(mountDownload(h.Download), req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, payload, rec.Body.String())
+	})
+
+	t.Run("?size=original: still dispatches to DownloadOriginal", func(t *testing.T) {
+		h, svc := newHandler(t)
+		id := uuid.Must(uuid.NewV7())
+		payload := "orig"
+		svc.EXPECT().
+			DownloadOriginal(anyCtx(), id).
+			Return(&svcavatar.DownloadResult{
+				Reader:      io.NopCloser(strings.NewReader(payload)),
+				ContentType: "image/jpeg",
+				Size:        int64(len(payload)),
+				Avatar:      &domain.Avatar{ID: id},
+			}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+id.String()+"?size=original", nil)
+		rec := serve(mountDownload(h.Download), req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, payload, rec.Body.String())
+	})
+
+	t.Run("?size=unknown: thumbnail service returns ErrNotFound → 404", func(t *testing.T) {
+		h, svc := newHandler(t)
+		id := uuid.Must(uuid.NewV7())
+		svc.EXPECT().
+			DownloadThumbnail(anyCtx(), id, "99x99").
+			Return(nil, svcavatar.ErrNotFound)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+id.String()+"?size=99x99", nil)
+		rec := serve(mountDownload(h.Download), req)
+		require.Equal(t, http.StatusNotFound, rec.Code)
+	})
 }
