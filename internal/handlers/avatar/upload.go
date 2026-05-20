@@ -53,17 +53,31 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	contentType := header.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
+	// Validate the upload's real content type via magic bytes — the multipart
+	// Content-Type and filename extension are client-supplied and can lie. The
+	// returned reader replays the bytes consumed for sniffing, so the service
+	// receives an unchanged stream.
+	detectedMIME, body, err := sniffImageMIME(file)
+	if err != nil {
+		if errors.Is(err, errUnsupportedMIME) {
+			httpx.WriteJSON(w, http.StatusUnsupportedMediaType, map[string]any{
+				"error":         "Unsupported image type",
+				"detected_mime": detectedMIME,
+				"allowed":       []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
+			})
+			return
+		}
+		h.log.Error("upload: sniff failed", "err", err, "user_id", userID)
+		httpx.WriteError(w, http.StatusBadRequest, "Could not read uploaded file", err.Error())
+		return
 	}
 
 	a, err := h.svc.Upload(ctx, svcavatar.UploadParams{
 		UserID:   userID,
 		FileName: header.Filename,
-		MIMEType: contentType,
+		MIMEType: detectedMIME,
 		Size:     header.Size,
-		Reader:   file,
+		Reader:   body,
 	})
 	if err != nil {
 		status, msg := mapServiceError(err)

@@ -48,3 +48,22 @@ func serve(h http.Handler, r *http.Request) *httptest.ResponseRecorder {
 	h.ServeHTTP(rec, r)
 	return rec
 }
+
+// jpegHeader is the JPEG SOI + APP0/JFIF marker. Twenty bytes is enough for
+// gabriel-vasile/mimetype to classify the buffer as image/jpeg; tests append
+// arbitrary payload to it to simulate a "real" upload.
+var jpegHeader = []byte{
+	0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10,
+	'J', 'F', 'I', 'F', 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+}
+
+// fakeJPEG returns bytes that start with the JPEG magic sequence and end with
+// the supplied trailer. Magic-byte sniffing only inspects the head, so the
+// trailer can be anything — tests use it to assert exact lengths or to add
+// uniqueness across cases.
+func fakeJPEG(trailer ...byte) []byte {
+	out := make([]byte, 0, len(jpegHeader)+len(trailer))
+	out = append(out, jpegHeader...)
+	out = append(out, trailer...)
+	return out
+}

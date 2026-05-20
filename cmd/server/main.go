@@ -117,7 +117,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
-		Handler:           buildRouter(log, healthH, avatarH, staticDir),
+		Handler:           buildRouter(log, cfg.Security, healthH, avatarH, staticDir),
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,

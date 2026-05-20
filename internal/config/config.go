@@ -13,6 +13,7 @@ type Config struct {
 	Postgres PostgresConfig
 	MinIO    MinIOConfig
 	RabbitMQ RabbitMQConfig
+	Security SecurityConfig
 }
 
 type HTTPConfig struct {
@@ -45,6 +46,24 @@ type MinIOConfig struct {
 type RabbitMQConfig struct {
 	URL      string `env:"RABBITMQ_URL,required"`
 	Exchange string `env:"RABBITMQ_EXCHANGE" envDefault:"avatars.exchange"`
+}
+
+// SecurityConfig groups the knobs for the defensive middleware layer (CORS,
+// rate limiting). All fields have safe defaults so the service can be brought
+// up without setting any of these explicitly, but a real deployment should
+// override CORSAllowedOrigins to something other than empty if it expects
+// cross-origin traffic.
+//
+// Rate-limit values are interpreted as requests-per-minute; a value <=0
+// disables the corresponding limiter (useful for e2e tests).
+type SecurityConfig struct {
+	// CORSAllowedOrigins is a comma-separated list of origins permitted in
+	// CORS preflight. Empty (default) denies all cross-origin requests, which
+	// is the right baseline for an embeddable avatar service that hasn't yet
+	// declared its consumers.
+	CORSAllowedOrigins   []string `env:"CORS_ALLOWED_ORIGINS" envSeparator:","`
+	RateLimitReadPerMin  int      `env:"RATE_LIMIT_READ_PER_MIN" envDefault:"100"`
+	RateLimitWritePerMin int      `env:"RATE_LIMIT_WRITE_PER_MIN" envDefault:"10"`
 }
 
 func Load() (*Config, error) {

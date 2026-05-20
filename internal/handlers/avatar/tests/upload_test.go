@@ -50,7 +50,7 @@ func TestUpload(t *testing.T) {
 	t.Run("happy path: 201 with UploadResponse", func(t *testing.T) {
 		h, svc := newHandler(t)
 
-		payload := []byte("fake image")
+		payload := fakeJPEG([]byte("more bytes")...)
 		body, ct := buildMultipart(t, "file", "selfie.jpg", "image/jpeg", payload)
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
@@ -129,7 +129,7 @@ func TestUpload(t *testing.T) {
 	t.Run("service.Upload returns generic error: 500", func(t *testing.T) {
 		h, svc := newHandler(t)
 
-		body, ct := buildMultipart(t, "file", "x.jpg", "image/jpeg", []byte("x"))
+		body, ct := buildMultipart(t, "file", "x.jpg", "image/jpeg", fakeJPEG())
 		svc.EXPECT().
 			Upload(mock.Anything, mock.Anything).
 			Return(nil, errors.New("boom"))
@@ -139,6 +139,49 @@ func TestUpload(t *testing.T) {
 
 		rec := serve(middleware.UserID(http.HandlerFunc(h.Upload)), req)
 		require.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+
+	t.Run("non-image payload (text masquerading as png): 415", func(t *testing.T) {
+		h, _ := newHandler(t)
+
+		// Client claims it's a PNG, filename ends in .png, but the body is
+		// plain text. Magic-byte sniffing must catch this before the service
+		// layer is invoked — so no mock.EXPECT here.
+		body, ct := buildMultipart(t, "file", "evil.png", "image/png",
+			[]byte("This is plain text, not a PNG file at all."))
+
+		req := newRequestWithUser(http.MethodPost, "/api/v1/avatars", body, userID)
+		req.Header.Set("Content-Type", ct)
+
+		rec := serve(middleware.UserID(http.HandlerFunc(h.Upload)), req)
+		require.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		require.Equal(t, "Unsupported image type", got["error"])
+		require.NotEmpty(t, got["detected_mime"], "response must echo the detected MIME so the client can debug")
+	})
+
+	t.Run("real JPEG with mismatched declared content type: still accepted (we trust magic bytes)", func(t *testing.T) {
+		h, svc := newHandler(t)
+
+		// Client claims image/png in the multipart Content-Type, but the body
+		// is genuinely a JPEG. Our policy is "trust the bytes, not the label",
+		// so the upload should succeed and the SERVICE should see image/jpeg.
+		payload := fakeJPEG()
+		body, ct := buildMultipart(t, "file", "wrong-ext.png", "image/png", payload)
+
+		svc.EXPECT().
+			Upload(mock.Anything, mock.MatchedBy(func(p svcavatar.UploadParams) bool {
+				return p.MIMEType == "image/jpeg"
+			})).
+			Return(&domain.Avatar{ID: uuid.Must(uuid.NewV7()), UserID: userID, CreatedAt: time.Now()}, nil)
+
+		req := newRequestWithUser(http.MethodPost, "/api/v1/avatars", body, userID)
+		req.Header.Set("Content-Type", ct)
+
+		rec := serve(middleware.UserID(http.HandlerFunc(h.Upload)), req)
+		require.Equal(t, http.StatusCreated, rec.Code)
 	})
 
 	// Silence unused-import warning when the file is trimmed.
