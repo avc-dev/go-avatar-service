@@ -24,7 +24,7 @@ func (r *PostgresRepository) UpdateProcessingStatus(
 
 	const query = `
 		UPDATE avatars
-		SET processing_status = $2, thumbnail_s3_keys = $3
+		SET processing_status = $2::processing_status, thumbnail_s3_keys = $3, updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 
 	tag, err := r.pool.Exec(ctx, query, id, string(status), thumbsJSON)

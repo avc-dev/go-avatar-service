@@ -35,8 +35,6 @@ func (s *Service) Delete(ctx context.Context, id, requestingUserID uuid.UUID) er
 		AvatarID: a.ID,
 		S3Keys:   collectS3Keys(a),
 	}); pubErr != nil {
-		// TODO: replace with outbox pattern. Until then, orphan objects in
-		// object storage may accumulate until a reconciliation job is added.
 		s.log.Warn("avatar soft-deleted but delete event was not published",
 			"avatar_id", a.ID,
 			"err", pubErr,

@@ -46,7 +46,7 @@ func TestConsumeDeliversPublishedMessage(t *testing.T) {
 		S3Key:    "avatars/" + uuid.NewString() + "/original.png",
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	got := &received{}
@@ -65,7 +65,7 @@ func TestConsumeDeliversPublishedMessage(t *testing.T) {
 	// makes failures easier to diagnose.
 	time.Sleep(100 * time.Millisecond)
 
-	pubCtx, pubCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	pubCtx, pubCancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer pubCancel()
 	require.NoError(t, testRMQ.PublishAvatarUploaded(pubCtx, event))
 
@@ -90,7 +90,7 @@ func TestConsumeHandlerErrorRoutesToDLX(t *testing.T) {
 		S3Key:    "avatars/" + uuid.NewString() + "/original.png",
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	handlerCalled := make(chan struct{}, 1)
@@ -106,7 +106,7 @@ func TestConsumeHandlerErrorRoutesToDLX(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	pubCtx, pubCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	pubCtx, pubCancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer pubCancel()
 	require.NoError(t, testRMQ.PublishAvatarUploaded(pubCtx, event))
 

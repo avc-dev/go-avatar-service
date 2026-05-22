@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 
 func TestGetCurrentByUserID(t *testing.T) {
 	repo := newRepo()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("returns most recent avatar for user", func(t *testing.T) {
 		truncateAvatars(t)

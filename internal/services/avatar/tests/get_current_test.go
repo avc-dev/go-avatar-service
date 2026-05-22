@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestGetCurrentByUserID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	userID := uuid.Must(uuid.NewV7())
 
 	t.Run("returns avatar when user has one", func(t *testing.T) {

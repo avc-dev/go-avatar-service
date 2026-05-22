@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 )
 
 func TestListByUserID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	userID := uuid.Must(uuid.NewV7())
 
 	t.Run("passes through list from repo", func(t *testing.T) {

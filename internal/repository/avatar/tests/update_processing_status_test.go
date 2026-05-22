@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 
 func TestUpdateProcessingStatus(t *testing.T) {
 	repo := newRepo()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("updates status, persists thumbs, and trigger bumps updated_at", func(t *testing.T) {
 		truncateAvatars(t)

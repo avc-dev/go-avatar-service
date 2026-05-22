@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"strings"
@@ -17,7 +16,7 @@ import (
 )
 
 func TestDownloadOriginal(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	id := uuid.Must(uuid.NewV7())
 
 	t.Run("happy: returns body and metadata", func(t *testing.T) {

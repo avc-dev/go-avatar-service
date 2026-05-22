@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -15,7 +14,7 @@ import (
 )
 
 func TestDelete(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	id := uuid.Must(uuid.NewV7())
 	userID := uuid.Must(uuid.NewV7())
 

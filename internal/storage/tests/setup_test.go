@@ -103,7 +103,7 @@ func newMinIO(t *testing.T) *storage.MinIO {
 // test that needs a clean slate.
 func cleanBucket(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	objCh := testAdmin.ListObjects(ctx, testBucket, minio.ListObjectsOptions{Recursive: true})
 	for obj := range objCh {
@@ -121,7 +121,7 @@ func cleanBucket(t *testing.T) {
 func putRaw(t *testing.T, key, contentType string, payload []byte) {
 	t.Helper()
 	_, err := testAdmin.PutObject(
-		context.Background(),
+		t.Context(),
 		testBucket,
 		key,
 		bytes.NewReader(payload),

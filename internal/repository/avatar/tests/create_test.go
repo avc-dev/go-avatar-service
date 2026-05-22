@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,7 +12,7 @@ import (
 func TestCreate(t *testing.T) {
 	truncateAvatars(t)
 	repo := newRepo()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	userID := uuid.Must(uuid.NewV7())
 	a := newAvatar(t, userID)

@@ -44,7 +44,7 @@ func TestPublishAvatarUploaded(t *testing.T) {
 		S3Key:    "avatars/" + uuid.NewString() + "/original.png",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	err := testRMQ.PublishAvatarUploaded(ctx, event)
@@ -71,7 +71,7 @@ func TestPublishAvatarDeleted(t *testing.T) {
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	err := testRMQ.PublishAvatarDeleted(ctx, event)

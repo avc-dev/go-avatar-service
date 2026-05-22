@@ -1,14 +1,13 @@
 package storage_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestDelete(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("removes existing object", func(t *testing.T) {
 		cleanBucket(t)

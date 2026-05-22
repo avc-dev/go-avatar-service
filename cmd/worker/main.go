@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
@@ -88,24 +88,22 @@ func run() error {
 
 	// --- Consumer loop: two queues, two goroutines ---
 
-	// consumeErrs is buffered for the number of consumers so a fatal error
-	// from either can be reported without blocking the producer goroutine.
-	const consumerCount = 2
-	consumeErrs := make(chan error, consumerCount)
-	var wg sync.WaitGroup
+	// errgroup.WithContext gives us two guarantees: the first non-nil return
+	// cancels gctx (so the sibling consumer drops out of its blocking Consume),
+	// and g.Wait blocks until both have actually exited.
+	g, gctx := errgroup.WithContext(ctx)
 
 	startConsumer := func(queue string, handler broker.Handler) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		g.Go(func() error {
 			log.Info("consumer starting", "queue", queue)
-			err := rmq.Consume(ctx, queue, handler)
+			defer log.Info("consumer stopped", "queue", queue)
+			err := rmq.Consume(gctx, queue, handler)
 			// Graceful shutdown wraps context.Canceled — not a real error.
 			if err != nil && !errors.Is(err, context.Canceled) {
-				consumeErrs <- fmt.Errorf("consume %s: %w", queue, err)
+				return fmt.Errorf("consume %s: %w", queue, err)
 			}
-			log.Info("consumer stopped", "queue", queue)
-		}()
+			return nil
+		})
 	}
 
 	startConsumer(broker.QueueUploaded, w.HandleUploaded)
@@ -113,20 +111,12 @@ func run() error {
 
 	log.Info("worker running", "queues", []string{broker.QueueUploaded, broker.QueueDeleted})
 
-	// Wait for either:
-	//   - SIGINT/SIGTERM (ctx.Done)
-	//   - a consumer returning a fatal (non-Cancelled) error
-	// On either path, ensure both consumers have fully drained before we
-	// touch deferred Close() calls.
-	select {
-	case <-ctx.Done():
-		log.Info("shutdown signal received")
-	case err := <-consumeErrs:
+	err = g.Wait()
+	if err != nil {
 		log.Error("consumer failed; initiating shutdown", "err", err)
-		stop() // cancels ctx → other consumer exits too
+	} else {
+		log.Info("shutdown signal received")
 	}
-
-	wg.Wait()
 	log.Info("worker stopped")
-	return nil
+	return err
 }

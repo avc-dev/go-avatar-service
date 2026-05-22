@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 
 func TestListByUserID(t *testing.T) {
 	repo := newRepo()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("returns avatars in DESC order and excludes soft-deleted", func(t *testing.T) {
 		truncateAvatars(t)

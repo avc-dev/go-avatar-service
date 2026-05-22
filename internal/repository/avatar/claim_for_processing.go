@@ -26,10 +26,10 @@ import (
 func (r *PostgresRepository) ClaimForProcessing(ctx context.Context, id uuid.UUID) (*domain.Avatar, error) {
 	const query = `
 		UPDATE avatars
-		SET processing_status = $2
+		SET processing_status = $2::processing_status, updated_at = NOW()
 		WHERE id = $1
 		  AND deleted_at IS NULL
-		  AND processing_status = $3
+		  AND processing_status = $3::processing_status
 		RETURNING ` + avatarColumns
 
 	row := r.pool.QueryRow(ctx, query, id,

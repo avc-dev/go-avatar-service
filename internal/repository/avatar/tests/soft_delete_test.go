@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -14,7 +13,7 @@ import (
 // (setup → SoftDelete → check error), differing only in initial state.
 func TestSoftDelete(t *testing.T) {
 	repo := newRepo()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name      string

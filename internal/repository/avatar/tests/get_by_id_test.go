@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -12,7 +11,7 @@ import (
 
 func TestGetByID(t *testing.T) {
 	repo := newRepo()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("returns avatar when row exists", func(t *testing.T) {
 		truncateAvatars(t)

@@ -1,14 +1,13 @@
 package storage_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestExists(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("true for existing key", func(t *testing.T) {
 		cleanBucket(t)

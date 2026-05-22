@@ -1,7 +1,6 @@
 package storage_test
 
 import (
-	"context"
 	"io"
 	"testing"
 
@@ -9,7 +8,7 @@ import (
 )
 
 func TestDownload(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("returns content-type and size for existing object", func(t *testing.T) {
 		cleanBucket(t)

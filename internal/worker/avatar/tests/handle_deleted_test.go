@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -9,7 +8,7 @@ import (
 )
 
 func TestHandleDeleted(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	msgID := "msg-del"
 
 	t.Run("happy: every key deleted", func(t *testing.T) {

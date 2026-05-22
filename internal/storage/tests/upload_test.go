@@ -2,7 +2,6 @@ package storage_test
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func TestUpload(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string

@@ -16,7 +16,7 @@ import (
 )
 
 func TestUpload(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	userID := uuid.Must(uuid.NewV7())
 
 	buildParams := func() avatar.UploadParams {

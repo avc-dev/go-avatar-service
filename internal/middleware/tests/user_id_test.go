@@ -1,7 +1,6 @@
 package middleware_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -128,7 +127,7 @@ func TestUserIDMiddleware(t *testing.T) {
 }
 
 func TestUserIDFromContext_Missing(t *testing.T) {
-	id, err := middleware.UserIDFromContext(context.Background())
+	id, err := middleware.UserIDFromContext(t.Context())
 
 	require.ErrorIs(t, err, middleware.ErrMissingUserID)
 	require.Equal(t, uuid.Nil, id)

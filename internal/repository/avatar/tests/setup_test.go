@@ -124,7 +124,7 @@ func newRepo() *avatar.PostgresRepository {
 // (or via t.Cleanup) when isolation matters.
 func truncateAvatars(t *testing.T) {
 	t.Helper()
-	_, err := testPool.Exec(context.Background(), "TRUNCATE TABLE avatars")
+	_, err := testPool.Exec(t.Context(), "TRUNCATE TABLE avatars")
 	require.NoError(t, err)
 }
 

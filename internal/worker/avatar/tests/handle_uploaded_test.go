@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"strings"
@@ -31,7 +30,7 @@ func downloadResult(body string) *storage.DownloadResult {
 // collapsed into a single ClaimForProcessing call, which is the only
 // idempotency gate — these tests reflect that contract.
 func TestHandleUploaded(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	msgID := "msg-test"
 
 	t.Run("happy: claim succeeds → process → mark completed", func(t *testing.T) {

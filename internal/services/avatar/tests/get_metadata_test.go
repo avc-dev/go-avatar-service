@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -14,7 +13,7 @@ import (
 )
 
 func TestGetMetadata(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	id := uuid.Must(uuid.NewV7())
 
 	t.Run("returns avatar when repo finds it", func(t *testing.T) {

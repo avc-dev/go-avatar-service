@@ -13,7 +13,7 @@ import (
 )
 
 func TestEnsureBucket(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("creates bucket when missing", func(t *testing.T) {
 		bucket := "ensure-" + uuid.Must(uuid.NewV7()).String()
@@ -42,7 +42,7 @@ func TestEnsureBucket(t *testing.T) {
 func storageWithBucket(t *testing.T, bucket string) *storage.MinIO {
 	t.Helper()
 
-	endpoint, err := testContainer.PortEndpoint(context.Background(), "9000/tcp", "")
+	endpoint, err := testContainer.PortEndpoint(t.Context(), "9000/tcp", "")
 	require.NoError(t, err)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

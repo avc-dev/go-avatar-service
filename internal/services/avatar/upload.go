@@ -62,7 +62,6 @@ func (s *Service) Upload(ctx context.Context, p UploadParams) (*domain.Avatar, e
 			s.log.Error("upload compensation failed: orphan in object storage",
 				"s3_key", s3Key,
 				"delete_err", delErr,
-				"create_err", err,
 			)
 		}
 		return nil, fmt.Errorf("create avatar record: %w", err)
@@ -73,9 +72,6 @@ func (s *Service) Upload(ctx context.Context, p UploadParams) (*domain.Avatar, e
 		UserID:   p.UserID,
 		S3Key:    s3Key,
 	}); err != nil {
-		// TODO: replace with outbox pattern in a future iteration so the
-		// worker is guaranteed to learn about the upload even after a
-		// broker outage.
 		s.log.Warn("avatar created but upload event was not published",
 			"avatar_id", avatarID,
 			"err", err,

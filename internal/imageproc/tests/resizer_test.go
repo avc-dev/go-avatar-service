@@ -68,7 +68,7 @@ func TestResizeToJPEG_PNGInput(t *testing.T) {
 	r := imageproc.New()
 	src := encodePNG(t, makeRGBA(t, 256, 128))
 
-	out, err := r.ResizeToJPEG(context.Background(), bytes.NewReader(src), 100, 100, 85)
+	out, err := r.ResizeToJPEG(t.Context(), bytes.NewReader(src), 100, 100, 85)
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
 
@@ -82,7 +82,7 @@ func TestResizeToJPEG_JPEGUpscale(t *testing.T) {
 	r := imageproc.New()
 	src := encodeJPEG(t, makeRGBA(t, 200, 200), 90)
 
-	out, err := r.ResizeToJPEG(context.Background(), bytes.NewReader(src), 300, 300, 85)
+	out, err := r.ResizeToJPEG(t.Context(), bytes.NewReader(src), 300, 300, 85)
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
 
@@ -97,7 +97,7 @@ func TestResizeToJPEG_WebPInput(t *testing.T) {
 	src, err := base64.StdEncoding.DecodeString(tinyWebPBase64)
 	require.NoError(t, err)
 
-	out, err := r.ResizeToJPEG(context.Background(), bytes.NewReader(src), 100, 100, 85)
+	out, err := r.ResizeToJPEG(t.Context(), bytes.NewReader(src), 100, 100, 85)
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
 
@@ -111,7 +111,7 @@ func TestResizeToJPEG_SameSizeRoundTrip(t *testing.T) {
 	r := imageproc.New()
 	src := encodePNG(t, makeRGBA(t, 100, 100))
 
-	out, err := r.ResizeToJPEG(context.Background(), bytes.NewReader(src), 100, 100, 85)
+	out, err := r.ResizeToJPEG(t.Context(), bytes.NewReader(src), 100, 100, 85)
 	require.NoError(t, err)
 
 	format, bounds := decodeJPEG(t, out)
@@ -140,7 +140,7 @@ func TestResizeToJPEG_FillCropAspectRatios(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := encodePNG(t, makeRGBA(t, tc.srcW, tc.srcH))
-			out, err := r.ResizeToJPEG(context.Background(), bytes.NewReader(src), tc.dstW, tc.dstH, 85)
+			out, err := r.ResizeToJPEG(t.Context(), bytes.NewReader(src), tc.dstW, tc.dstH, 85)
 			require.NoError(t, err)
 
 			format, bounds := decodeJPEG(t, out)
@@ -155,7 +155,7 @@ func TestResizeToJPEG_InvalidInputBytes(t *testing.T) {
 	r := imageproc.New()
 	junk := []byte("this is not an image, just some random bytes that should fail decode")
 
-	_, err := r.ResizeToJPEG(context.Background(), bytes.NewReader(junk), 100, 100, 85)
+	_, err := r.ResizeToJPEG(t.Context(), bytes.NewReader(junk), 100, 100, 85)
 	require.Error(t, err)
 	msg := err.Error()
 	require.True(t,
@@ -184,7 +184,7 @@ func TestResizeToJPEG_ValidationErrors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := r.ResizeToJPEG(context.Background(), bytes.NewReader(src), tc.width, tc.height, tc.quality)
+			_, err := r.ResizeToJPEG(t.Context(), bytes.NewReader(src), tc.width, tc.height, tc.quality)
 			require.Error(t, err)
 			msg := strings.ToLower(err.Error())
 			require.True(t,
@@ -199,7 +199,7 @@ func TestResizeToJPEG_CancelledContext(t *testing.T) {
 	r := imageproc.New()
 	src := encodePNG(t, makeRGBA(t, 100, 100))
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	_, err := r.ResizeToJPEG(ctx, bytes.NewReader(src), 100, 100, 85)

@@ -1,7 +1,6 @@
 package avatar_test
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -15,7 +14,7 @@ import (
 
 func TestClaimForProcessing(t *testing.T) {
 	repo := newRepo()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("pending → processing returns the claimed row", func(t *testing.T) {
 		truncateAvatars(t)

@@ -56,7 +56,7 @@ import (
 // cleans S3. Failures here mean some layer is broken at the seam, not in its
 // own unit tests.
 func TestEndToEnd_AvatarLifecycle(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// --- Dependencies (testcontainers) ---
@@ -92,7 +92,7 @@ func TestEndToEnd_AvatarLifecycle(t *testing.T) {
 	// t.Cleanup. Without this, a broker dying mid-test would silently swallow
 	// the real cause and the test would just fail with "thumbnails never
 	// appeared" — making the failure much harder to debug in CI.
-	workerCtx, stopWorker := context.WithCancel(context.Background())
+	workerCtx, stopWorker := context.WithCancel(t.Context())
 	var consumerWG sync.WaitGroup
 	consumerErrs := make(chan error, 2)
 

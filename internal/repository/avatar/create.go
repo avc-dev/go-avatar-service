@@ -25,7 +25,7 @@ func (r *PostgresRepository) Create(ctx context.Context, a *domain.Avatar) error
 			created_at, updated_at, deleted_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9,
+			$7, $8::upload_status, $9::processing_status,
 			COALESCE($10, NOW()), COALESCE($11, NOW()), $12
 		)
 		RETURNING created_at, updated_at`

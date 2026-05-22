@@ -53,14 +53,14 @@ func TestRedactURL(t *testing.T) {
 
 func TestProbeWithTimeout(t *testing.T) {
 	t.Run("probe succeeds: no error", func(t *testing.T) {
-		err := bootutil.ProbeWithTimeout(context.Background(), 100*time.Millisecond, "ok probe",
+		err := bootutil.ProbeWithTimeout(t.Context(), 100*time.Millisecond, "ok probe",
 			func(context.Context) error { return nil })
 		require.NoError(t, err)
 	})
 
 	t.Run("probe returns error: wrapped with label", func(t *testing.T) {
 		sentinel := errors.New("boom")
-		err := bootutil.ProbeWithTimeout(context.Background(), 100*time.Millisecond, "broken probe",
+		err := bootutil.ProbeWithTimeout(t.Context(), 100*time.Millisecond, "broken probe",
 			func(context.Context) error { return sentinel })
 		require.Error(t, err)
 		require.ErrorIs(t, err, sentinel)
@@ -68,7 +68,7 @@ func TestProbeWithTimeout(t *testing.T) {
 	})
 
 	t.Run("probe respects timeout: context cancelled propagates", func(t *testing.T) {
-		err := bootutil.ProbeWithTimeout(context.Background(), 10*time.Millisecond, "slow probe",
+		err := bootutil.ProbeWithTimeout(t.Context(), 10*time.Millisecond, "slow probe",
 			func(ctx context.Context) error {
 				<-ctx.Done()
 				return ctx.Err()
