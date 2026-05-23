@@ -1,67 +1,189 @@
-# Шаблонный репозиторий для сервиса "Аватарница"
+# GophProfile — сервис аватарок
 
-Это шаблонный репозиторий для выпускной работы по курсу "Go-разработчик". Он содержит базовую структуру проекта, готовую к дальнейшей разработке, а также техническое задание и пример веб-интерфейса.
+Маленький микросервис на Go, который хранит аватарки пользователей и отдаёт
+их по REST API. Пользователь загружает картинку один раз, дальше любой
+внешний сервис (форум, блог, виджет комментариев) может получить аватар по
+ID пользователя.
 
-## Описание
+Оригинал лежит в S3-совместимом хранилище (локально — MinIO), миниатюры
+100×100 и 300×300 генерирует отдельный воркер асинхронно через очередь.
 
-Проект "Аватарница" — это микросервис для управления аватарками пользователей. Он предоставляет REST API для загрузки, получения и удаления изображений, а также простой веб-интерфейс для взаимодействия с сервисом.
+## Что внутри
 
-## Структура проекта
+- HTTP-сервер на `chi`
+- Postgres через `pgx/v5`, миграции на `golang-migrate`
+- MinIO через `minio-go/v7`
+- RabbitMQ через `amqp091-go` (topic-обменник + DLX для terminal-фейлов)
+- Ресайз картинок — `disintegration/imaging` (чистый Go, без CGO)
+- Структурные логи `log/slog`
+- Конфиг из env (`caarlos0/env/v11`)
+- Тесты — `testify` + `testcontainers-go`, моки через `mockery`
 
-Проект имеет следующую структуру, основанную на лучших практиках разработки на Go:
+## Как запустить — всё в Docker
 
-```
-/
-├── cmd/                # Точки входа в приложение (main.go)
-│   ├── server/         # HTTP-сервер
-│   └── worker/         # Воркер для асинхронной обработки задач
-├── internal/           # Внутренняя логика приложения
-│   ├── api/            # Спецификации API (OpenAPI/Swagger)
-│   ├── config/         # Конфигурация приложения
-│   ├── domain/         # Основные доменные сущности
-│   ├── handlers/       # HTTP-обработчики
-│   ├── repository/     # Работа с хранилищем (БД, S3)
-│   ├── services/       # Бизнес-логика
-│   └── worker/         # Логика воркера
-├── pkg/                # Публичные библиотеки, которые можно использовать в других проектах
-├── web/                # Веб-интерфейс
-│   └── static/         # Статические файлы (HTML, CSS, JS)
-├── migrations/         # Миграции базы данных
-├── docker/             # Docker-файлы и конфигурации
-├── k8s/                # Манифесты Kubernetes
-├── tests/              # Интеграционные и e2e тесты
-├── docs/               # Документация проекта
-└── .gitignore          # Файл для исключения файлов из Git
+Нужен Docker Desktop (или engine + compose v2).
+
+```bash
+make up        # поднимет postgres, minio, rabbitmq, migrator, app-server, app-worker
+make ps        # проверить что все контейнеры healthy
+make logs      # хвост логов compose
 ```
 
-## Как начать работу
+После старта:
 
-1.  **Клонируйте репозиторий:**
-    ```bash
-    git clone <URL этого репозитория>
-    cd go-avatar-service-template
-    ```
+- `http://localhost:8080/web/` — веб-интерфейс (загружай/смотри/удаляй аватарки)
+- `http://localhost:8080/health` — статус компонентов (200 если всё ок, 503 если что-то отвалилось)
+- `http://localhost:15673/` — RabbitMQ Management UI (guest/guest)
+- `http://localhost:9001/` — MinIO Console (minioadmin/minioadmin)
 
-2.  **Инициализируйте свой репозиторий на GitHub:**
-    Следуйте инструкциям GitHub для создания нового репозитория и свяжите его с этим локальным репозиторием.
+> ⚠️ Пароли в `compose.yaml` и `.env.example` — это **dev-дефолты**, чтобы
+> можно было собрать стек одной командой. В реальном деплое их нужно убрать
+> в secret-store и заменить переменными окружения.
 
-3.  **Установите зависимости:**
-    ```bash
-    go mod tidy
-    ```
+```bash
+make down      # остановить, volume'ы не трогаем
+```
 
-4.  **Настройте окружение:**
-    Создайте файл `.env` на основе `.env.example` (необходимо будет его создать) и укажите необходимые переменные окружения (данные для подключения к БД, S3 и т.д.).
+## Как запустить — приложение на хосте, зависимости в Docker
 
-5.  **Запустите сервисы с помощью Docker Compose:**
-    ```bash
-    docker-compose up --build
-    ```
+Так обычно удобнее работать: правишь Go-код, видишь рестарт без пересборки
+образа.
 
-После этого сервис будет доступен по адресу `http://localhost:8080`.
+```bash
+make up                  # только инфраструктура (если ещё не поднята)
+cp .env.example .env     # уже настроен на локальные порты
+make migrate-up          # накатить схему
+make run-server          # терминал A
+make run-worker          # терминал B
+```
 
-## Веб-интерфейс
+`.env` смотрит на **нестандартные host-порты**, чтобы не конфликтовать с
+другими проектами на той же машине:
 
-Простой одностраничный веб-интерфейс для загрузки аватарок доступен по адресу `http://localhost:8080/`. Он находится в файле `web/static/index.html`.
+- Postgres — `5433` (а не 5432)
+- RabbitMQ AMQP — `5673`, Management UI — `15673`
+- MinIO — стандартные 9000/9001 (там обычно никто не сидит)
 
-**Важно:** Этот интерфейс предоставлен для облегчения старта и демонстрации работы API. Вы можете изменять его, адаптировать под свои нужды или полностью заменить на свой собственный фронтенд.
+Внутри compose сервисы между собой общаются на стандартных портах через
+service-name (`postgres:5432`, `rabbitmq:5672` и т.д.) — это переопределено
+в `compose.yaml` через `environment:` отдельно от `.env`.
+
+## API
+
+| Метод | Путь | Auth | Что делает |
+|---|---|---|---|
+| `POST` | `/api/v1/avatars` | `X-User-ID` | Загрузить файл (multipart, поле `file`, до 10 MB) |
+| `GET` | `/api/v1/avatars/{id}` | — | Стрим оригинала |
+| `GET` | `/api/v1/avatars/{id}?size=100x100` | — | Стрим миниатюры (доступные размеры: `100x100`, `300x300`) |
+| `GET` | `/api/v1/avatars/{id}/metadata` | — | JSON с метаданными и URL'ами миниатюр |
+| `DELETE` | `/api/v1/avatars/{id}` | `X-User-ID`, владелец | Soft-delete + асинхронная очистка S3 |
+| `GET` | `/api/v1/users/{user_id}/avatar` | — | Стрим текущей (последней) аватарки пользователя |
+| `GET` | `/api/v1/users/{user_id}/avatars` | — | Список всех неудалённых аватарок пользователя |
+| `DELETE` | `/api/v1/users/{user_id}/avatar` | `X-User-ID == user_id` | Удалить текущую аватарку |
+| `GET` | `/health` | — | Статус Postgres/MinIO/RabbitMQ |
+| `GET` | `/web/*` | — | Статика SPA |
+
+`X-User-ID` принимается **только в формате UUID v7**. Middleware режет
+любой другой UUID c 400. Та же проверка применяется к `{user_id}` в пути.
+
+Чтения публичны — это нужный кейс «внешний сайт показывает аватар»: ему
+авторизация не нужна, нужен только идентификатор пользователя.
+
+## Структура
+
+```
+cmd/
+  server/      HTTP-сервер
+  worker/      обработчик очереди
+internal/
+  broker/      Publisher + Consumer для RabbitMQ (плюс NoOp для тестов)
+  config/      env-конфиг
+  domain/      Avatar и доменные события
+  handlers/    HTTP-хендлеры + health
+  httpx/       общие хелперы записи JSON-ответов
+  imageproc/   Decode → Fill → JPEG
+  logger/      slog setup
+  middleware/  RequestID-friendly logger и валидатор X-User-ID
+  repository/  pgx-обвязка
+  services/    use-case оркестрация (сага компенсации в Upload)
+  storage/     MinIO-адаптер
+  worker/      обработчики событий (идемпотентны через DB-статус)
+migrations/    SQL-миграции
+tests/         e2e-тест со всеми зависимостями (testcontainers, build tag `integration`)
+web/static/    SPA (один HTML, Tailwind через CDN, vanilla JS)
+```
+
+Внутри каждого слоя — поддиректория по агрегату (`internal/services/avatar/`,
+`internal/handlers/avatar/`), и **по файлу на публичный метод**. Имена типов
+без префикса агрегата: `avatar.Service`, `avatar.Repository`, не
+`AvatarService` / `AvatarRepository`.
+
+## Тесты
+
+```bash
+make test              # юнит + пер-пакетные интеграционные (testcontainers внутри)
+make test-integration  # e2e через весь стек (testcontainers, ~15-30s)
+make lint              # golangci-lint
+```
+
+E2e-тест поднимает реальные PG/MinIO/RMQ в testcontainers, запускает
+in-process воркер и HTTP-сервер, делает полный цикл upload → ждёт миниатюр
+→ скачивает → удаляет → проверяет что worker почистил S3.
+
+## Make-таргеты
+
+```
+make up                  поднять весь стек
+make down                остановить
+make logs / make ps      что там в compose
+make run-server          запустить сервер на хосте против дockerized-зависимостей
+make run-worker          то же для воркера
+make migrate-up/down     накатить/откатить миграции (через host migrate CLI)
+make test                юнит-тесты
+make test-integration    e2e
+make lint                golangci-lint
+make mocks               перегенерить моки через mockery
+make build               собрать бинарники в bin/
+make docker-build        собрать app-image без запуска
+make help                этот список
+```
+
+## Что нужно поставить на хост для dev
+
+- Go 1.25+
+- Docker (Desktop или engine + compose v2)
+- `migrate` CLI — если хочешь использовать `make migrate-up` с хоста:
+  ```
+  go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+  ```
+- `mockery` v2 — если будешь править интерфейсы и регенерить моки:
+  ```
+  go install github.com/vektra/mockery/v2@latest
+  ```
+- `golangci-lint` v2:
+  ```
+  brew install golangci-lint
+  # или
+  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+  ```
+
+В compose ничего из этого не требуется — migrator там отдельный one-shot
+сервис на официальном образе `migrate/migrate`.
+
+## Чего пока нет
+
+Прямо сейчас сервис работает, но это всё ещё MVP. Что в голове на потом:
+
+- Автореконнект к RabbitMQ — сейчас если коннект порвался, процесс падает.
+  Перезапуск процесса обходит проблему, но в проде хочется аккуратнее.
+- Outbox-паттерн или reconciliation-job для случая «положили в БД, не
+  успели опубликовать событие». Сейчас в этом случае пишем WARN и идём
+  дальше, аватар остаётся со статусом `pending`.
+- Если воркер упал ровно посреди обработки, запись зависает в статусе
+  `processing`. Нужна джоба-сторож, которая возвращает их в `pending` через
+  N минут.
+- Валидация MIME через magic bytes, rate limit, CORS — не сделано, ждёт
+  своей очереди.
+- `width`/`height` в metadata — в схеме нет; добавим, если появится
+  потребность.
+- CI пока не настроен.

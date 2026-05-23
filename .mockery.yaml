@@ -1,0 +1,27 @@
+with-expecter: true
+disable-version-string: true
+resolve-type-alias: false
+issue-845-fix: true
+mockname: "Mock{{.InterfaceName}}"
+filename: "mock_{{.InterfaceName | snakecase}}.go"
+outpkg: mocks
+packages:
+  github.com/avc-dev/go-avatar-service/internal/services/avatar:
+    config:
+      dir: "internal/services/avatar/mocks"
+    interfaces:
+      Repository:
+      ObjectStorage:
+      EventPublisher:
+  github.com/avc-dev/go-avatar-service/internal/handlers/avatar:
+    config:
+      dir: "internal/handlers/avatar/mocks"
+    interfaces:
+      Service:
+  github.com/avc-dev/go-avatar-service/internal/worker/avatar:
+    config:
+      dir: "internal/worker/avatar/mocks"
+    interfaces:
+      Repository:
+      Storage:
+      ImageResizer:

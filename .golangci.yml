@@ -1,0 +1,35 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+  exclusions:
+    rules:
+      # Generated mocks: skip every linter — author is mockery, not us.
+      - path: 'mocks/'
+        linters:
+          - errcheck
+          - govet
+          - ineffassign
+          - staticcheck
+          - unused
+          - misspell
+      # Tests routinely ignore error returns from helpers (e.g. closing a
+      # mock body after the assertion has already run); not worth flagging.
+      - path: '_test\.go'
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
