@@ -3,9 +3,11 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
@@ -37,6 +39,9 @@ func buildRouter(
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
+	// SpanName runs early so its deferred rename observes the matched chi route
+	// pattern once the inner chain (routing + handler) has returned.
+	r.Use(mw.SpanName)
 	r.Use(mw.Logger(log))
 	r.Use(chimw.Recoverer)
 	r.Use(mw.CORS(cfg.CORSAllowedOrigins))
@@ -69,5 +74,23 @@ func buildRouter(
 		})
 	})
 
-	return r
+	// otelhttp wraps the whole router so every request gets a server span with
+	// W3C trace-context extracted from inbound headers. The filter keeps
+	// operational/static traffic (health probes, SPA assets) out of the trace
+	// stream — they would otherwise dominate it with no diagnostic value.
+	return otelhttp.NewHandler(r, "http.server", otelhttp.WithFilter(traceableRequest))
+}
+
+// traceableRequest reports whether a request should produce a server span. We
+// trace the API surface and skip health checks and static SPA assets.
+func traceableRequest(r *http.Request) bool {
+	p := r.URL.Path
+	switch {
+	case p == "/health", p == "/metrics", p == "/":
+		return false
+	case strings.HasPrefix(p, "/web"):
+		return false
+	default:
+		return true
+	}
 }

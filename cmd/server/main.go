@@ -11,18 +11,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	handleravatar "github.com/avc-dev/go-avatar-service/internal/handlers/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/logger"
+	"github.com/avc-dev/go-avatar-service/internal/observability"
 	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
 	svcavatar "github.com/avc-dev/go-avatar-service/internal/services/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 )
+
+// serviceName identifies this binary as a distinct node in the trace graph,
+// separate from the worker (see observability.Init).
+const serviceName = "gophprofile-server"
 
 // healthCheckTimeout bounds the total /health probe (across all components).
 const healthCheckTimeout = 5 * time.Second
@@ -52,11 +55,23 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// --- Observability ---
+
+	shutdownTracing, err := observability.Init(ctx, cfg.Observability, serviceName, log)
+	if err != nil {
+		return fmt.Errorf("init tracing: %w", err)
+	}
+	defer func() {
+		if err := shutdownTracing(context.Background()); err != nil {
+			log.Warn("tracing shutdown", "err", err)
+		}
+	}()
+
 	// --- Infrastructure ---
 
-	pool, err := pgxpool.New(ctx, cfg.Postgres.DSN)
+	pool, err := bootutil.NewTracedPool(ctx, cfg.Postgres.DSN)
 	if err != nil {
-		return fmt.Errorf("create pg pool: %w", err)
+		return err
 	}
 	defer pool.Close()
 

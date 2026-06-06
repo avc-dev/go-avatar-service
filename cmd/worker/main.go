@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
@@ -17,10 +16,15 @@ import (
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/imageproc"
 	"github.com/avc-dev/go-avatar-service/internal/logger"
+	"github.com/avc-dev/go-avatar-service/internal/observability"
 	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 	workeravatar "github.com/avc-dev/go-avatar-service/internal/worker/avatar"
 )
+
+// serviceName identifies this binary as a distinct node in the trace graph,
+// separate from the server (see observability.Init).
+const serviceName = "gophprofile-worker"
 
 func main() {
 	if err := run(); err != nil {
@@ -41,11 +45,23 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// --- Observability ---
+
+	shutdownTracing, err := observability.Init(ctx, cfg.Observability, serviceName, log)
+	if err != nil {
+		return fmt.Errorf("init tracing: %w", err)
+	}
+	defer func() {
+		if err := shutdownTracing(context.Background()); err != nil {
+			log.Warn("tracing shutdown", "err", err)
+		}
+	}()
+
 	// --- Infrastructure ---
 
-	pool, err := pgxpool.New(ctx, cfg.Postgres.DSN)
+	pool, err := bootutil.NewTracedPool(ctx, cfg.Postgres.DSN)
 	if err != nil {
-		return fmt.Errorf("create pg pool: %w", err)
+		return err
 	}
 	defer pool.Close()
 

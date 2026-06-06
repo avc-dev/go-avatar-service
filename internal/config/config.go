@@ -8,12 +8,13 @@ import (
 )
 
 type Config struct {
-	HTTP     HTTPConfig
-	Log      LogConfig
-	Postgres PostgresConfig
-	MinIO    MinIOConfig
-	RabbitMQ RabbitMQConfig
-	Security SecurityConfig
+	HTTP          HTTPConfig
+	Log           LogConfig
+	Postgres      PostgresConfig
+	MinIO         MinIOConfig
+	RabbitMQ      RabbitMQConfig
+	Security      SecurityConfig
+	Observability ObservabilityConfig
 }
 
 type HTTPConfig struct {
@@ -64,6 +65,30 @@ type SecurityConfig struct {
 	CORSAllowedOrigins   []string `env:"CORS_ALLOWED_ORIGINS" envSeparator:","`
 	RateLimitReadPerMin  int      `env:"RATE_LIMIT_READ_PER_MIN" envDefault:"100"`
 	RateLimitWritePerMin int      `env:"RATE_LIMIT_WRITE_PER_MIN" envDefault:"10"`
+}
+
+// ObservabilityConfig groups the OpenTelemetry tracing knobs. Tracing is on by
+// default but degrades gracefully: with Enabled=false (or no collector
+// reachable) the global tracer provider stays the OTel no-op, so the otelhttp /
+// otelpgx wrappers create zero-cost spans and the rest of the code is unaware.
+//
+// ServiceName is intentionally NOT an env field: the server and worker share
+// the same environment, so each binary passes its own constant name to
+// observability.Init — that keeps them distinct nodes in the Jaeger dependency
+// graph (gophprofile-server -> rabbitmq -> gophprofile-worker).
+type ObservabilityConfig struct {
+	Enabled bool `env:"OTEL_ENABLED" envDefault:"true"`
+	// OTLPEndpoint is the host:port of the OTLP/gRPC collector. Default targets
+	// the collector service inside compose; override to localhost:4317 for a
+	// process running outside the compose network.
+	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"otel-collector:4317"`
+	// Environment populates the deployment.environment resource attribute so a
+	// single Jaeger/Grafana can distinguish local vs other deployments.
+	Environment string `env:"OTEL_ENVIRONMENT" envDefault:"local"`
+	// SampleRatio is the head-sampling probability for root spans (parent
+	// decisions are always respected). 1.0 traces everything — the right
+	// default for dev; lower it under real load.
+	SampleRatio float64 `env:"OTEL_TRACES_SAMPLER_RATIO" envDefault:"1.0"`
 }
 
 func Load() (*Config, error) {
