@@ -3,6 +3,11 @@ package broker
 import (
 	"context"
 	"fmt"
+
+	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Handler processes a single delivered message body. The messageID matches
@@ -63,28 +68,53 @@ func (r *RabbitMQ) Consume(ctx context.Context, queueName string, handler Handle
 				// Let the caller decide on retry.
 				return fmt.Errorf("broker: consume %s: delivery channel closed", queueName)
 			}
-			if err := handler(ctx, d.Body, d.MessageId); err != nil {
-				if nackErr := d.Nack(false /*multiple*/, false /*requeue*/); nackErr != nil {
-					r.log.Error("broker: nack failed",
-						"queue", queueName,
-						"message_id", d.MessageId,
-						"err", nackErr,
-					)
-				}
-				r.log.Warn("broker: handler returned error, message routed to DLX",
-					"queue", queueName,
-					"message_id", d.MessageId,
-					"err", err,
-				)
-				continue
-			}
-			if err := d.Ack(false); err != nil {
-				r.log.Error("broker: ack failed",
-					"queue", queueName,
-					"message_id", d.MessageId,
-					"err", err,
-				)
-			}
+			r.deliver(ctx, queueName, d, handler)
 		}
+	}
+}
+
+// deliver processes one message: it continues the publisher's trace (extracted
+// from the message headers) under a consumer span, runs the handler, and
+// ack/nacks based on the outcome. Pulling this out of the Consume loop gives the
+// span a clean defer-bounded lifetime instead of a per-iteration close.
+//
+// ctx carries the worker's cancellation; Extract layers the remote span context
+// on top so the consumer span links to the producer span (same trace_id) while
+// still being cancellable on shutdown.
+func (r *RabbitMQ) deliver(ctx context.Context, queueName string, d amqp.Delivery, handler Handler) {
+	msgCtx := otel.GetTextMapPropagator().Extract(ctx, amqpHeaderCarrier(d.Headers))
+	msgCtx, span := tracer.Start(msgCtx, "rabbitmq.process "+queueName,
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.source.name", queueName),
+			attribute.String("messaging.message.id", d.MessageId),
+			attribute.String("messaging.operation", "process"),
+		),
+	)
+	defer span.End()
+
+	if err := handler(msgCtx, d.Body, d.MessageId); err != nil {
+		_ = failSpan(span, err)
+		if nackErr := d.Nack(false /*multiple*/, false /*requeue*/); nackErr != nil {
+			r.log.ErrorContext(msgCtx, "broker: nack failed",
+				"queue", queueName,
+				"message_id", d.MessageId,
+				"err", nackErr,
+			)
+		}
+		r.log.WarnContext(msgCtx, "broker: handler returned error, message routed to DLX",
+			"queue", queueName,
+			"message_id", d.MessageId,
+			"err", err,
+		)
+		return
+	}
+	if err := d.Ack(false); err != nil {
+		r.log.ErrorContext(msgCtx, "broker: ack failed",
+			"queue", queueName,
+			"message_id", d.MessageId,
+			"err", err,
+		)
 	}
 }

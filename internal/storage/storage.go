@@ -12,7 +12,24 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// tracer is the instrumentation scope for object-storage spans. Spans started
+// here wrap each logical operation; the otelhttp-wrapped client transport adds
+// a nested span for the actual S3 HTTP call underneath.
+var tracer = otel.Tracer("github.com/avc-dev/go-avatar-service/internal/storage")
+
+// failSpan marks span as errored and returns err unchanged, for ergonomic
+// `return failSpan(span, fmt.Errorf(...))` at error sites.
+func failSpan(span trace.Span, err error) error {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	return err
+}
 
 // Storage is the object-storage port. All methods take a context.Context first
 // and propagate it to the underlying client so callers can cancel long-running
@@ -60,9 +77,18 @@ func NewMinIO(cfg Config, log *slog.Logger) (*MinIO, error) {
 	if log == nil {
 		return nil, fmt.Errorf("storage: logger is required")
 	}
+	// Start from MinIO's own transport (keeps its connection-pool tuning) and
+	// wrap it so every S3 HTTP call emits a client span nested under the
+	// logical storage span. Reads the global propagator/provider — a no-op
+	// until tracing is enabled.
+	baseTransport, err := minio.DefaultTransport(cfg.UseSSL)
+	if err != nil {
+		return nil, fmt.Errorf("init minio transport: %w", err)
+	}
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
-		Secure: cfg.UseSSL,
+		Creds:     credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+		Secure:    cfg.UseSSL,
+		Transport: otelhttp.NewTransport(baseTransport),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("init minio client: %w", err)

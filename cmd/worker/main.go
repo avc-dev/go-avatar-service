@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
+	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	"github.com/avc-dev/go-avatar-service/internal/imageproc"
 	"github.com/avc-dev/go-avatar-service/internal/logger"
 	"github.com/avc-dev/go-avatar-service/internal/observability"
@@ -25,6 +28,9 @@ import (
 // serviceName identifies this binary as a distinct node in the trace graph,
 // separate from the server (see observability.Init).
 const serviceName = "gophprofile-worker"
+
+// healthCheckTimeout bounds the worker's /health probe across all components.
+const healthCheckTimeout = 5 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -102,12 +108,45 @@ func run() error {
 	repo := repoavatar.NewPostgresRepository(pool)
 	w := workeravatar.New(repo, minioStore, resizer, log)
 
-	// --- Consumer loop: two queues, two goroutines ---
+	// --- Consumer loop + admin server, all under one errgroup ---
 
 	// errgroup.WithContext gives us two guarantees: the first non-nil return
-	// cancels gctx (so the sibling consumer drops out of its blocking Consume),
-	// and g.Wait blocks until both have actually exited.
+	// cancels gctx (so siblings drop out of their blocking calls), and g.Wait
+	// blocks until everything has actually exited.
 	g, gctx := errgroup.WithContext(ctx)
+
+	// Admin HTTP server: gives the worker a /health endpoint (and later
+	// /metrics) despite having no business HTTP surface. Same checkers as the
+	// server so the worker's view of its dependencies is consistent.
+	healthH := handlers.NewHealthHandler(
+		map[string]handlers.HealthChecker{
+			"postgres": handlers.HealthCheckerFunc(pool.Ping),
+			"minio":    minioStore,
+			"rabbitmq": rmq,
+		},
+		healthCheckTimeout,
+	)
+	adminSrv := &http.Server{
+		Addr:              ":" + cfg.HTTP.WorkerAdminPort,
+		Handler:           buildAdminRouter(healthH),
+		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
+	}
+	g.Go(func() error {
+		log.Info("worker admin server listening", "addr", adminSrv.Addr)
+		if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("admin server: %w", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		<-gctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout)
+		defer cancel()
+		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("admin server shutdown: %w", err)
+		}
+		return nil
+	})
 
 	startConsumer := func(queue string, handler broker.Handler) {
 		g.Go(func() error {

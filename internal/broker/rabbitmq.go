@@ -8,6 +8,9 @@ import (
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Static interface assertion: *RabbitMQ must satisfy Publisher.
@@ -129,6 +132,50 @@ func declareTopology(ch *amqp.Channel) error {
 		}
 	}
 
+	return nil
+}
+
+// publish is the shared producer path for both event types. It starts a
+// producer span, injects the active trace context into the message headers (so
+// the consumer can continue the same trace), and publishes body under
+// routingKey while holding pubMu — amqp091 forbids concurrent channel use, and
+// pubCh is shared across all HTTP handlers.
+//
+// eventName is the human-readable event label (e.g. "avatar.uploaded") used in
+// the span name and error message; messageID is the avatar UUID string.
+func (r *RabbitMQ) publish(ctx context.Context, routingKey, eventName, messageID string, body []byte) error {
+	ctx, span := tracer.Start(ctx, "rabbitmq.publish "+eventName,
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.destination.name", ExchangeName),
+			attribute.String("messaging.rabbitmq.routing_key", routingKey),
+			attribute.String("messaging.message.id", messageID),
+		),
+	)
+	defer span.End()
+
+	headers := amqp.Table{}
+	otel.GetTextMapPropagator().Inject(ctx, amqpHeaderCarrier(headers))
+
+	r.pubMu.Lock()
+	defer r.pubMu.Unlock()
+	if err := r.pubCh.PublishWithContext(
+		ctx,
+		ExchangeName,
+		routingKey,
+		false, // mandatory
+		false, // immediate
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			MessageId:    messageID,
+			Headers:      headers,
+			Body:         body,
+		},
+	); err != nil {
+		return failSpan(span, fmt.Errorf("broker: publish %s for %s: %w", eventName, messageID, err))
+	}
 	return nil
 }
 

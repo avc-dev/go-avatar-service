@@ -25,6 +25,10 @@ type HTTPConfig struct {
 	IdleTimeout       time.Duration `env:"HTTP_IDLE_TIMEOUT" envDefault:"120s"`
 	ShutdownTimeout   time.Duration `env:"HTTP_SHUTDOWN_TIMEOUT" envDefault:"10s"`
 	MaxUploadBytes    int64         `env:"HTTP_MAX_UPLOAD_BYTES" envDefault:"10485760"`
+	// WorkerAdminPort is the port for the worker's minimal admin HTTP server
+	// (health, and later /metrics). The worker has no public HTTP surface, so
+	// this is the only listener it opens; the server binary ignores it.
+	WorkerAdminPort string `env:"WORKER_ADMIN_PORT" envDefault:"8081"`
 }
 
 type LogConfig struct {
