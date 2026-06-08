@@ -15,7 +15,7 @@ x-app-base: &app-base
       condition: service_healthy
     migrator:
       condition: service_completed_successfully
-    otel-collector:
+    jaeger:
       condition: service_started
   environment:
     # Inside compose, app talks to deps via service names and CONTAINER ports
@@ -35,9 +35,9 @@ x-app-base: &app-base
     CORS_ALLOWED_ORIGINS: ""
     RATE_LIMIT_READ_PER_MIN: "100"
     RATE_LIMIT_WRITE_PER_MIN: "10"
-    # Tracing: export OTLP/gRPC to the collector inside the compose network.
+    # Tracing: export OTLP/gRPC straight to Jaeger's native OTLP receiver.
     OTEL_ENABLED: "true"
-    OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+    OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
     OTEL_ENVIRONMENT: compose
   restart: unless-stopped
 
@@ -140,25 +140,10 @@ services:
 
   # --- Observability stack ---
 
-  # Receives OTLP from the app and forwards traces to Jaeger. Single egress for
-  # spans so the backend can change without touching the application.
-  # Core distribution is enough: our pipeline uses only otlp receiver, batch
-  # processor and otlp/debug exporters — all shipped in core (no contrib needed).
-  otel-collector:
-    image: otel/opentelemetry-collector:0.116.0
-    container_name: gophprofile-otel-collector
-    command: ["--config=/etc/otel-collector-config.yaml"]
-    volumes:
-      - ./docker/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-    ports:
-      - "4317:4317" # OTLP gRPC (also reachable for processes run outside compose)
-      - "4318:4318" # OTLP HTTP
-    depends_on:
-      jaeger:
-        condition: service_started
-
-  # Distributed tracing backend + UI. OTLP receiver enabled so the collector
-  # can push straight in.
+  # Distributed tracing backend + UI. The app exports OTLP/gRPC straight here
+  # (Jaeger's native OTLP receiver, no separate collector). An optional OTel
+  # Collector config is kept at docker/otel-collector-config.yaml if a
+  # collector hop is ever wanted in front of Jaeger.
   jaeger:
     image: jaegertracing/all-in-one:1.62.0
     container_name: gophprofile-jaeger
@@ -166,6 +151,7 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
       - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC (also lets a host-run app export to localhost:4317)
     restart: unless-stopped
 
   # Metrics store + scraper. Scrapes app-server, app-worker and rabbitmq;

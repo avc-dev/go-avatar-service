@@ -81,7 +81,9 @@ func TestEndToEnd_AvatarLifecycle(t *testing.T) {
 	// --- Application graph ---
 	repo := repoavatar.NewPostgresRepository(pool)
 	svc := svcavatar.New(repo, st, rmq, log)
-	handler := handleravatar.NewHandler(svc, log, 10*1024*1024)
+	// nil upload metrics — the recorder is nil-safe; the e2e asserts on behaviour,
+	// not on metrics.
+	handler := handleravatar.NewHandler(svc, log, 10*1024*1024, nil)
 
 	resizer := imageproc.New()
 	worker := workeravatar.New(repo, st, resizer, log)

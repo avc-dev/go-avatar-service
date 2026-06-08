@@ -82,10 +82,11 @@ type SecurityConfig struct {
 // graph (gophprofile-server -> rabbitmq -> gophprofile-worker).
 type ObservabilityConfig struct {
 	Enabled bool `env:"OTEL_ENABLED" envDefault:"true"`
-	// OTLPEndpoint is the host:port of the OTLP/gRPC collector. Default targets
-	// the collector service inside compose; override to localhost:4317 for a
-	// process running outside the compose network.
-	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"otel-collector:4317"`
+	// OTLPEndpoint is the host:port of the OTLP/gRPC trace receiver. Default
+	// targets Jaeger's native OTLP receiver inside compose; override to
+	// localhost:4317 (with Jaeger's OTLP port published) for a process running
+	// outside the compose network.
+	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"jaeger:4317"`
 	// Environment populates the deployment.environment resource attribute so a
 	// single Jaeger/Grafana can distinguish local vs other deployments.
 	Environment string `env:"OTEL_ENVIRONMENT" envDefault:"local"`
