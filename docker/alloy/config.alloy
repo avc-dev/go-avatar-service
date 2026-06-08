@@ -1,0 +1,49 @@
+// Grafana Alloy: discover running Docker containers, tail their stdout/stderr,
+// and push the lines to Loki. The app writes structured JSON to stdout and
+// knows nothing about Loki — log shipping is fully decoupled here.
+
+// Scope discovery to THIS compose project only. Without the filter,
+// discovery.docker picks up every container on the host (other projects like
+// cinema-back included) and ships their logs into our Loki.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=go-avatar-service"]
+  }
+}
+
+// Turn raw Docker metadata into useful Loki labels. trace_id is deliberately
+// NOT a label (it is high-cardinality) — it stays in the JSON line and Grafana
+// extracts it at query time via the Loki datasource's derived field.
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "project"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = { job = "docker" }
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
