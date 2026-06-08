@@ -1,0 +1,13 @@
+# Minimal Alertmanager config for the local stack. Alerts are grouped and
+# visible in the Alertmanager UI (http://localhost:9093) and in Prometheus
+# (/alerts). The "default" receiver has no external notifier — for a real
+# deployment, add a Slack/email/webhook config under it.
+route:
+  receiver: default
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: default

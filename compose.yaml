@@ -168,7 +168,8 @@ services:
       - "16686:16686" # Jaeger UI
     restart: unless-stopped
 
-  # Metrics store + scraper. Scrapes app-server, app-worker and rabbitmq.
+  # Metrics store + scraper. Scrapes app-server, app-worker and rabbitmq;
+  # evaluates alert rules and forwards firing alerts to Alertmanager.
   prometheus:
     image: prom/prometheus:v2.55.1
     container_name: gophprofile-prometheus
@@ -181,6 +182,22 @@ services:
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
+    depends_on:
+      alertmanager:
+        condition: service_started
+    restart: unless-stopped
+
+  # Routes/deduplicates firing alerts. UI on 9093; the default receiver has no
+  # external notifier (see docker/alertmanager/alertmanager.yml).
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: gophprofile-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - ./docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
     restart: unless-stopped
 
   # Log aggregation backend for the JSON logs Alloy ships from container stdout.
