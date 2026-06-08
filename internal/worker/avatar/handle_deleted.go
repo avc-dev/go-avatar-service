@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/avc-dev/go-avatar-service/internal/domain"
 )
@@ -18,8 +19,13 @@ import (
 // a reconciliation job (future iteration) or an operator can finish the
 // cleanup.
 func (w *Worker) HandleDeleted(ctx context.Context, body []byte, messageID string) error {
+	start := time.Now()
+	status := statusSuccess
+	defer func() { w.metrics.Record(eventDeleted, status, time.Since(start).Seconds()) }()
+
 	var event domain.AvatarDeleteEvent
 	if err := json.Unmarshal(body, &event); err != nil {
+		status = statusFailed
 		return fmt.Errorf("worker: unmarshal delete event (msg %s): %w", messageID, err)
 	}
 
@@ -45,6 +51,7 @@ func (w *Worker) HandleDeleted(ctx context.Context, body []byte, messageID strin
 	}
 
 	if firstErr != nil {
+		status = statusFailed
 		return fmt.Errorf("worker: delete event for avatar %s left %d/%d keys: %w",
 			event.AvatarID, len(failed), len(event.S3Keys), firstErr)
 	}

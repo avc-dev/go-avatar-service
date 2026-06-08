@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
@@ -19,6 +21,7 @@ import (
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	"github.com/avc-dev/go-avatar-service/internal/imageproc"
 	"github.com/avc-dev/go-avatar-service/internal/logger"
+	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	"github.com/avc-dev/go-avatar-service/internal/observability"
 	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
@@ -63,6 +66,9 @@ func run() error {
 		}
 	}()
 
+	reg := prometheus.NewRegistry()
+	metrics.RegisterRuntime(reg)
+
 	// --- Infrastructure ---
 
 	pool, err := bootutil.NewTracedPool(ctx, cfg.Postgres.DSN)
@@ -70,6 +76,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	metrics.RegisterPool(reg, pool, "worker")
 
 	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "postgres ping", pool.Ping); err != nil {
 		return err
@@ -106,7 +113,8 @@ func run() error {
 
 	resizer := imageproc.New()
 	repo := repoavatar.NewPostgresRepository(pool)
-	w := workeravatar.New(repo, minioStore, resizer, log)
+	procMetrics := metrics.NewProcessing(reg)
+	w := workeravatar.New(repo, minioStore, resizer, log, workeravatar.WithMetrics(procMetrics))
 
 	// --- Consumer loop + admin server, all under one errgroup ---
 
@@ -128,7 +136,7 @@ func run() error {
 	)
 	adminSrv := &http.Server{
 		Addr:              ":" + cfg.HTTP.WorkerAdminPort,
-		Handler:           buildAdminRouter(healthH),
+		Handler:           buildAdminRouter(healthH, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})),
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 	}
 	g.Go(func() error {

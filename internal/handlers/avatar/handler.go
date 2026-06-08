@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/avc-dev/go-avatar-service/internal/domain"
+	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	svcavatar "github.com/avc-dev/go-avatar-service/internal/services/avatar"
 )
 
@@ -67,15 +68,20 @@ type Handler struct {
 	svc            Service
 	log            *slog.Logger
 	maxUploadBytes int64
+	uploadMetrics  *metrics.Upload
 }
 
 // NewHandler builds a Handler. maxUploadBytes caps the multipart body size
 // for the upload endpoint via http.MaxBytesReader; it is also echoed back to
 // the client in the 413 response so the UI can show a meaningful limit.
-func NewHandler(svc Service, log *slog.Logger, maxUploadBytes int64) *Handler {
+//
+// uploadMetrics may be nil (the recorder is nil-safe), which keeps handler
+// unit tests free of metrics wiring.
+func NewHandler(svc Service, log *slog.Logger, maxUploadBytes int64, uploadMetrics *metrics.Upload) *Handler {
 	return &Handler{
 		svc:            svc,
 		log:            log,
 		maxUploadBytes: maxUploadBytes,
+		uploadMetrics:  uploadMetrics,
 	}
 }

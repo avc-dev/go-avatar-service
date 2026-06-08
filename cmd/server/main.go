@@ -11,12 +11,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	handleravatar "github.com/avc-dev/go-avatar-service/internal/handlers/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/logger"
+	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	"github.com/avc-dev/go-avatar-service/internal/observability"
 	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
 	svcavatar "github.com/avc-dev/go-avatar-service/internal/services/avatar"
@@ -67,6 +71,11 @@ func run() error {
 		}
 	}()
 
+	// Metrics registry: this binary's own registry (no global default), with
+	// the standard Go/process collectors for the resource-utilisation panels.
+	reg := prometheus.NewRegistry()
+	metrics.RegisterRuntime(reg)
+
 	// --- Infrastructure ---
 
 	pool, err := bootutil.NewTracedPool(ctx, cfg.Postgres.DSN)
@@ -74,6 +83,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	metrics.RegisterPool(reg, pool, "server")
 
 	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "postgres ping", pool.Ping); err != nil {
 		return err
@@ -107,11 +117,18 @@ func run() error {
 	}()
 	log.Info("rabbitmq connected", "url", bootutil.RedactURL(cfg.RabbitMQ.URL))
 
+	// --- Metrics instruments ---
+
+	httpMetrics := metrics.NewHTTP(reg)
+	uploadMetrics := metrics.NewUpload(reg)
+	storageMetrics := metrics.NewStorage(reg)
+	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+
 	// --- Application layer ---
 
 	avatarRepo := repoavatar.NewPostgresRepository(pool)
 	avatarSvc := svcavatar.New(avatarRepo, minioStore, rmq, log)
-	avatarH := handleravatar.NewHandler(avatarSvc, log, cfg.HTTP.MaxUploadBytes)
+	avatarH := handleravatar.NewHandler(avatarSvc, log, cfg.HTTP.MaxUploadBytes, uploadMetrics)
 
 	healthH := handlers.NewHealthHandler(
 		map[string]handlers.HealthChecker{
@@ -122,11 +139,15 @@ func run() error {
 		healthCheckTimeout,
 	)
 
+	// Storage-usage gauge: sample the DB sum periodically rather than at scrape
+	// time, so a slow query can never stall a Prometheus scrape.
+	go sampleStorageBytes(ctx, log, avatarRepo, storageMetrics)
+
 	// --- HTTP server + graceful shutdown ---
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
-		Handler:           buildRouter(log, cfg.Security, healthH, avatarH, staticDir),
+		Handler:           buildRouter(log, cfg.Security, healthH, avatarH, httpMetrics, metricsHandler, staticDir),
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,

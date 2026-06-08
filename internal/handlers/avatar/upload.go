@@ -3,6 +3,7 @@ package avatar
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/avc-dev/go-avatar-service/internal/httpx"
 	"github.com/avc-dev/go-avatar-service/internal/middleware"
@@ -72,6 +73,10 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Time the actual upload work (not the preceding client-side validation):
+	// the business counter should reflect upload operations that ran, while
+	// 4xx validation rejections are already visible in the HTTP RED metrics.
+	uploadStart := time.Now()
 	a, err := h.svc.Upload(ctx, svcavatar.UploadParams{
 		UserID:   userID,
 		FileName: header.Filename,
@@ -80,6 +85,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		Reader:   body,
 	})
 	if err != nil {
+		h.uploadMetrics.Record("error", time.Since(uploadStart).Seconds())
 		status, msg := mapServiceError(err)
 		if status >= 500 {
 			h.log.Error("upload: service.Upload failed", "err", err, "user_id", userID)
@@ -87,6 +93,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, status, msg)
 		return
 	}
+	h.uploadMetrics.Record("success", time.Since(uploadStart).Seconds())
 
 	httpx.WriteJSON(w, http.StatusCreated, UploadResponse{
 		ID:        a.ID,

@@ -12,6 +12,7 @@ import (
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	handleravatar "github.com/avc-dev/go-avatar-service/internal/handlers/avatar"
+	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	mw "github.com/avc-dev/go-avatar-service/internal/middleware"
 )
 
@@ -35,6 +36,8 @@ func buildRouter(
 	cfg config.SecurityConfig,
 	healthH *handlers.HealthHandler,
 	avatarH *handleravatar.Handler,
+	httpMetrics *metrics.HTTP,
+	metricsHandler http.Handler,
 	staticPath string,
 ) http.Handler {
 	r := chi.NewRouter()
@@ -47,6 +50,9 @@ func buildRouter(
 	r.Use(mw.CORS(cfg.CORSAllowedOrigins))
 
 	r.Get("/health", healthH.Get)
+	// /metrics is mounted outside the /api/v1 group so it carries neither the
+	// RED middleware (no self-measurement) nor the rate limiter.
+	r.Handle("/metrics", metricsHandler)
 
 	// Root redirects to the SPA so a stray browser hit on `/` lands on the UI
 	// rather than a 404.
@@ -61,6 +67,7 @@ func buildRouter(
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(ipLimit)
+		r.Use(httpMetrics.Middleware)
 		r.Route("/avatars", func(r chi.Router) {
 			r.With(mw.UserID, userLimit).Post("/", avatarH.Upload)
 			r.Get("/{avatar_id}", avatarH.Download)

@@ -28,7 +28,9 @@ func newHandler(t *testing.T) (*avatar.Handler, *mocks.MockService) {
 	t.Helper()
 	svc := mocks.NewMockService(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return avatar.NewHandler(svc, log, testMaxUploadBytes), svc
+	// nil upload metrics — the recorder is nil-safe, handler tests don't assert
+	// on metrics.
+	return avatar.NewHandler(svc, log, testMaxUploadBytes, nil), svc
 }
 
 // newRequestWithUser builds an *http.Request carrying the X-User-ID header so
