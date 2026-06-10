@@ -1,6 +1,10 @@
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // Upload holds the business metrics for the avatar upload operation. A nil
 // *Upload is a valid no-op recorder, so the HTTP handler can be constructed
@@ -11,7 +15,7 @@ type Upload struct {
 }
 
 // NewUpload builds the upload business metrics and registers them on reg.
-func NewUpload(reg prometheus.Registerer) *Upload {
+func NewUpload(reg prometheus.Registerer) (*Upload, error) {
 	total := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "avatars_uploads_total",
 		Help: "Total avatar uploads by outcome (success|error).",
@@ -21,8 +25,10 @@ func NewUpload(reg prometheus.Registerer) *Upload {
 		Help:    "Avatar upload handling duration in seconds by outcome.",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"status"})
-	reg.MustRegister(total, duration)
-	return &Upload{total: total, duration: duration}
+	if err := register(reg, total, duration); err != nil {
+		return nil, fmt.Errorf("register upload metrics: %w", err)
+	}
+	return &Upload{total: total, duration: duration}, nil
 }
 
 // Record observes one completed upload attempt. Safe on a nil receiver.

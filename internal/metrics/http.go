@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -17,7 +18,7 @@ type HTTP struct {
 }
 
 // NewHTTP builds the HTTP RED metrics and registers them on reg.
-func NewHTTP(reg prometheus.Registerer) *HTTP {
+func NewHTTP(reg prometheus.Registerer) (*HTTP, error) {
 	requests := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "http_requests_total",
 		Help: "Total HTTP requests by method, route template and status code.",
@@ -27,8 +28,10 @@ func NewHTTP(reg prometheus.Registerer) *HTTP {
 		Help:    "HTTP request duration in seconds by method and route template.",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "route"})
-	reg.MustRegister(requests, duration)
-	return &HTTP{requests: requests, duration: duration}
+	if err := register(reg, requests, duration); err != nil {
+		return nil, fmt.Errorf("register http metrics: %w", err)
+	}
+	return &HTTP{requests: requests, duration: duration}, nil
 }
 
 // Middleware records the request count (with status code) and latency. The

@@ -3,20 +3,10 @@ package broker
 import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // tracer is the instrumentation scope for broker producer/consumer spans.
 var tracer = otel.Tracer("github.com/avc-dev/go-avatar-service/internal/broker")
-
-// failSpan marks span as errored and returns err unchanged, for ergonomic
-// `return failSpan(span, fmt.Errorf(...))` at error sites.
-func failSpan(span trace.Span, err error) error {
-	span.RecordError(err)
-	span.SetStatus(codes.Error, err.Error())
-	return err
-}
 
 // amqpHeaderCarrier adapts an amqp.Table to propagation.TextMapCarrier so the
 // global propagator can inject the trace context into outgoing message headers

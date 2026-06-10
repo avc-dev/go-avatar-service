@@ -20,26 +20,44 @@
 package metrics
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
+// register adds each collector to reg, returning the first registration error.
+// Constructors use this instead of reg.MustRegister so a registration failure
+// (e.g. a duplicate metric name) is returned to the caller rather than
+// panicking — these are ordinary constructors, not package-level init.
+func register(reg prometheus.Registerer, cs ...prometheus.Collector) error {
+	for _, c := range cs {
+		if err := reg.Register(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RegisterRuntime registers the standard Go runtime and process collectors,
 // which back the resource-utilisation panels (goroutines, heap, GC, CPU,
 // open fds) with zero custom code.
-func RegisterRuntime(reg prometheus.Registerer) {
-	reg.MustRegister(
+func RegisterRuntime(reg prometheus.Registerer) error {
+	if err := register(reg,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-	)
+	); err != nil {
+		return fmt.Errorf("register runtime collectors: %w", err)
+	}
+	return nil
 }
 
 // RegisterPool exposes pgx pool saturation as gauges, labelled by role
 // ("server"/"worker") so one dashboard can show both processes' pools.
 // pool.Stat() is an in-memory snapshot, so sampling it at scrape time via
 // GaugeFunc is cheap and cannot block the scrape.
-func RegisterPool(reg prometheus.Registerer, pool *pgxpool.Pool, role string) {
+func RegisterPool(reg prometheus.Registerer, pool *pgxpool.Pool, role string) error {
 	labels := prometheus.Labels{"role": role}
 	gauge := func(name, help string, read func(*pgxpool.Stat) float64) prometheus.Collector {
 		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
@@ -48,7 +66,7 @@ func RegisterPool(reg prometheus.Registerer, pool *pgxpool.Pool, role string) {
 			ConstLabels: labels,
 		}, func() float64 { return read(pool.Stat()) })
 	}
-	reg.MustRegister(
+	if err := register(reg,
 		gauge("db_pool_total_conns", "Total connections currently in the pgx pool.",
 			func(s *pgxpool.Stat) float64 { return float64(s.TotalConns()) }),
 		gauge("db_pool_acquired_conns", "Connections currently checked out of the pgx pool.",
@@ -57,5 +75,8 @@ func RegisterPool(reg prometheus.Registerer, pool *pgxpool.Pool, role string) {
 			func(s *pgxpool.Stat) float64 { return float64(s.IdleConns()) }),
 		gauge("db_pool_max_conns", "Configured maximum pool size.",
 			func(s *pgxpool.Stat) float64 { return float64(s.MaxConns()) }),
-	)
+	); err != nil {
+		return fmt.Errorf("register db pool metrics: %w", err)
+	}
+	return nil
 }

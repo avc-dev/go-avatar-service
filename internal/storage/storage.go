@@ -14,22 +14,12 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // tracer is the instrumentation scope for object-storage spans. Spans started
 // here wrap each logical operation; the otelhttp-wrapped client transport adds
 // a nested span for the actual S3 HTTP call underneath.
 var tracer = otel.Tracer("github.com/avc-dev/go-avatar-service/internal/storage")
-
-// failSpan marks span as errored and returns err unchanged, for ergonomic
-// `return failSpan(span, fmt.Errorf(...))` at error sites.
-func failSpan(span trace.Span, err error) error {
-	span.RecordError(err)
-	span.SetStatus(codes.Error, err.Error())
-	return err
-}
 
 // Storage is the object-storage port. All methods take a context.Context first
 // and propagate it to the underlying client so callers can cancel long-running

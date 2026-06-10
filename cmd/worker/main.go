@@ -61,13 +61,19 @@ func run() error {
 		return fmt.Errorf("init tracing: %w", err)
 	}
 	defer func() {
-		if err := shutdownTracing(context.Background()); err != nil {
-			log.Warn("tracing shutdown", "err", err)
+		// The shutdown timeout is the caller's call: bound the flush here so a
+		// dead trace backend cannot stall process exit.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			log.Error("tracing shutdown", "err", err)
 		}
 	}()
 
 	reg := prometheus.NewRegistry()
-	metrics.RegisterRuntime(reg)
+	if err := metrics.RegisterRuntime(reg); err != nil {
+		return fmt.Errorf("register runtime metrics: %w", err)
+	}
 
 	// --- Infrastructure ---
 
@@ -76,7 +82,9 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	metrics.RegisterPool(reg, pool, "worker")
+	if err := metrics.RegisterPool(reg, pool, "worker"); err != nil {
+		return fmt.Errorf("register pool metrics: %w", err)
+	}
 
 	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "postgres ping", pool.Ping); err != nil {
 		return err
@@ -113,7 +121,10 @@ func run() error {
 
 	resizer := imageproc.New()
 	repo := repoavatar.NewPostgresRepository(pool)
-	procMetrics := metrics.NewProcessing(reg)
+	procMetrics, err := metrics.NewProcessing(reg)
+	if err != nil {
+		return fmt.Errorf("build processing metrics: %w", err)
+	}
 	w := workeravatar.New(repo, minioStore, resizer, log, workeravatar.WithMetrics(procMetrics))
 
 	// --- Consumer loop + admin server, all under one errgroup ---

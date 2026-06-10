@@ -66,15 +66,21 @@ func run() error {
 		return fmt.Errorf("init tracing: %w", err)
 	}
 	defer func() {
-		if err := shutdownTracing(context.Background()); err != nil {
-			log.Warn("tracing shutdown", "err", err)
+		// The shutdown timeout is the caller's call: bound the flush here so a
+		// dead trace backend cannot stall process exit.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			log.Error("tracing shutdown", "err", err)
 		}
 	}()
 
 	// Metrics registry: this binary's own registry (no global default), with
 	// the standard Go/process collectors for the resource-utilisation panels.
 	reg := prometheus.NewRegistry()
-	metrics.RegisterRuntime(reg)
+	if err := metrics.RegisterRuntime(reg); err != nil {
+		return fmt.Errorf("register runtime metrics: %w", err)
+	}
 
 	// --- Infrastructure ---
 
@@ -83,7 +89,9 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	metrics.RegisterPool(reg, pool, "server")
+	if err := metrics.RegisterPool(reg, pool, "server"); err != nil {
+		return fmt.Errorf("register pool metrics: %w", err)
+	}
 
 	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "postgres ping", pool.Ping); err != nil {
 		return err
@@ -119,9 +127,18 @@ func run() error {
 
 	// --- Metrics instruments ---
 
-	httpMetrics := metrics.NewHTTP(reg)
-	uploadMetrics := metrics.NewUpload(reg)
-	storageMetrics := metrics.NewStorage(reg)
+	httpMetrics, err := metrics.NewHTTP(reg)
+	if err != nil {
+		return fmt.Errorf("build http metrics: %w", err)
+	}
+	uploadMetrics, err := metrics.NewUpload(reg)
+	if err != nil {
+		return fmt.Errorf("build upload metrics: %w", err)
+	}
+	storageMetrics, err := metrics.NewStorage(reg)
+	if err != nil {
+		return fmt.Errorf("build storage metrics: %w", err)
+	}
 	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 
 	// --- Application layer ---

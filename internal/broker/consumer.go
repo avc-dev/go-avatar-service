@@ -8,6 +8,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/avc-dev/go-avatar-service/internal/traceutil"
 )
 
 // Handler processes a single delivered message body. The messageID matches
@@ -95,15 +97,15 @@ func (r *RabbitMQ) deliver(ctx context.Context, queueName string, d amqp.Deliver
 	defer span.End()
 
 	if err := handler(msgCtx, d.Body, d.MessageId); err != nil {
-		_ = failSpan(span, err)
+		_ = traceutil.FailSpan(span, err)
 		if nackErr := d.Nack(false /*multiple*/, false /*requeue*/); nackErr != nil {
-			r.log.ErrorContext(msgCtx, "broker: nack failed",
+			r.log.ErrorContext(msgCtx, "nack failed",
 				"queue", queueName,
 				"message_id", d.MessageId,
 				"err", nackErr,
 			)
 		}
-		r.log.WarnContext(msgCtx, "broker: handler returned error, message routed to DLX",
+		r.log.WarnContext(msgCtx, "handler returned error, message routed to DLX",
 			"queue", queueName,
 			"message_id", d.MessageId,
 			"err", err,
@@ -111,7 +113,7 @@ func (r *RabbitMQ) deliver(ctx context.Context, queueName string, d amqp.Deliver
 		return
 	}
 	if err := d.Ack(false); err != nil {
-		r.log.ErrorContext(msgCtx, "broker: ack failed",
+		r.log.ErrorContext(msgCtx, "ack failed",
 			"queue", queueName,
 			"message_id", d.MessageId,
 			"err", err,

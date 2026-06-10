@@ -13,7 +13,8 @@ import (
 
 func TestProcessing_RecordCountsByEventAndStatus(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := metrics.NewProcessing(reg)
+	m, err := metrics.NewProcessing(reg)
+	require.NoError(t, err)
 
 	m.Record("uploaded", "success", 0.3)
 	m.Record("uploaded", "skipped", 0.001)

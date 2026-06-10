@@ -8,6 +8,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/avc-dev/go-avatar-service/internal/traceutil"
 )
 
 // Exists reports whether an object exists under key. A missing object yields
@@ -28,5 +30,5 @@ func (m *MinIO) Exists(ctx context.Context, key string) (bool, error) {
 	if errors.As(err, &er) && er.Code == "NoSuchKey" {
 		return false, nil
 	}
-	return false, failSpan(span, fmt.Errorf("stat object %s: %w", key, err))
+	return false, traceutil.FailSpan(span, fmt.Errorf("stat object %s: %w", key, err))
 }

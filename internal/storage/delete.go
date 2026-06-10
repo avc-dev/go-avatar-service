@@ -7,6 +7,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/avc-dev/go-avatar-service/internal/traceutil"
 )
 
 // Delete removes an object from the configured bucket. Per S3 semantics the
@@ -20,7 +22,7 @@ func (m *MinIO) Delete(ctx context.Context, key string) error {
 
 	err := m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{})
 	if err != nil {
-		return failSpan(span, fmt.Errorf("delete object %s: %w", key, err))
+		return traceutil.FailSpan(span, fmt.Errorf("delete object %s: %w", key, err))
 	}
 	return nil
 }

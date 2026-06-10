@@ -11,6 +11,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/avc-dev/go-avatar-service/internal/traceutil"
 )
 
 // Static interface assertion: *RabbitMQ must satisfy Publisher.
@@ -174,7 +176,7 @@ func (r *RabbitMQ) publish(ctx context.Context, routingKey, eventName, messageID
 			Body:         body,
 		},
 	); err != nil {
-		return failSpan(span, fmt.Errorf("broker: publish %s for %s: %w", eventName, messageID, err))
+		return traceutil.FailSpan(span, fmt.Errorf("broker: publish %s for %s: %w", eventName, messageID, err))
 	}
 	return nil
 }

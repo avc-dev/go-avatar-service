@@ -20,7 +20,8 @@ import (
 // a single series labelled with the template.
 func TestHTTP_MiddlewareUsesRouteTemplate(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := metrics.NewHTTP(reg)
+	m, err := metrics.NewHTTP(reg)
+	require.NoError(t, err)
 
 	r := chi.NewRouter()
 	r.Use(m.Middleware)

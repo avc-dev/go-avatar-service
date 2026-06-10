@@ -13,7 +13,8 @@ import (
 
 func TestUpload_RecordCountsByStatus(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := metrics.NewUpload(reg)
+	m, err := metrics.NewUpload(reg)
+	require.NoError(t, err)
 
 	m.Record("success", 0.10)
 	m.Record("success", 0.20)

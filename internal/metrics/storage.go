@@ -1,6 +1,10 @@
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // Storage holds the storage-usage business gauge. It is fed by a periodic
 // sampler (see cmd/server) rather than a scrape-time DB query, so a slow
@@ -10,13 +14,15 @@ type Storage struct {
 }
 
 // NewStorage builds the storage-usage gauge and registers it on reg.
-func NewStorage(reg prometheus.Registerer) *Storage {
+func NewStorage(reg prometheus.Registerer) (*Storage, error) {
 	g := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "avatars_storage_bytes",
 		Help: "Total bytes of stored (non-deleted) avatar originals.",
 	})
-	reg.MustRegister(g)
-	return &Storage{bytes: g}
+	if err := register(reg, g); err != nil {
+		return nil, fmt.Errorf("register storage metric: %w", err)
+	}
+	return &Storage{bytes: g}, nil
 }
 
 // Set publishes the latest total. Safe on a nil receiver.

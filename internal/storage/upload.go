@@ -8,6 +8,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/avc-dev/go-avatar-service/internal/traceutil"
 )
 
 // Upload streams body into the configured bucket under key. size is the exact
@@ -26,7 +28,7 @@ func (m *MinIO) Upload(ctx context.Context, key string, body io.Reader, size int
 		ContentType: contentType,
 	})
 	if err != nil {
-		return failSpan(span, fmt.Errorf("upload object %s: %w", key, err))
+		return traceutil.FailSpan(span, fmt.Errorf("upload object %s: %w", key, err))
 	}
 	return nil
 }

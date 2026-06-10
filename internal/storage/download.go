@@ -7,6 +7,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/avc-dev/go-avatar-service/internal/traceutil"
 )
 
 // Download fetches an object by key. It performs a Stat first so size and
@@ -22,13 +24,13 @@ func (m *MinIO) Download(ctx context.Context, key string) (*DownloadResult, erro
 
 	obj, err := m.client.GetObject(ctx, m.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, failSpan(span, fmt.Errorf("get object %s: %w", key, err))
+		return nil, traceutil.FailSpan(span, fmt.Errorf("get object %s: %w", key, err))
 	}
 
 	info, err := obj.Stat()
 	if err != nil {
 		_ = obj.Close()
-		return nil, failSpan(span, fmt.Errorf("stat object %s: %w", key, err))
+		return nil, traceutil.FailSpan(span, fmt.Errorf("stat object %s: %w", key, err))
 	}
 	span.SetAttributes(attribute.Int64("s3.object_size", info.Size))
 

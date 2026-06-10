@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -97,13 +96,8 @@ func Init(ctx context.Context, cfg config.ObservabilityConfig, serviceName strin
 	)
 
 	return func(shutdownCtx context.Context) error {
-		// Bound the flush so a dead collector cannot stall process exit beyond
-		// the caller's own deadline.
-		if _, ok := shutdownCtx.Deadline(); !ok {
-			var cancel context.CancelFunc
-			shutdownCtx, cancel = context.WithTimeout(shutdownCtx, 5*time.Second)
-			defer cancel()
-		}
+		// The flush deadline is the caller's responsibility — we honour exactly
+		// the context passed in and do not impose our own timeout.
 		if err := tp.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("observability: shutdown tracer provider: %w", err)
 		}
