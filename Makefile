@@ -31,7 +31,7 @@ lint: ## Run golangci-lint (install: brew install golangci-lint OR go install gi
 mocks: ## Regenerate test mocks via mockery
 	mockery
 
-up: ## Start docker stack (postgres + minio + rabbitmq + app-server + app-worker via compose)
+up: ## Start full docker stack (infra + app + observability: prometheus/grafana/jaeger/loki) via compose
 	docker compose up -d
 
 down: ## Stop docker stack

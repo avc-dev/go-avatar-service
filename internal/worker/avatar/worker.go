@@ -28,6 +28,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/avc-dev/go-avatar-service/internal/domain"
+	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 )
 
@@ -58,6 +59,19 @@ var defaultRetryDelays = []time.Duration{
 // is the conventional sweet spot for image quality vs. file size.
 const jpegQuality = 85
 
+// Processing-metric label values. event labels identify which handler ran;
+// status labels its outcome. Centralising them here keeps the avatars_processing_*
+// series consistent and guards against typos at the (multiple) call sites that
+// set the status before the deferred recorder reads it.
+const (
+	eventUploaded = "uploaded"
+	eventDeleted  = "deleted"
+
+	statusSuccess = "success" // work completed
+	statusSkipped = "skipped" // not actionable (e.g. already claimed / missing)
+	statusFailed  = "failed"  // returned an error to the broker (routed to DLX)
+)
+
 // Repository is the persistence dependency. Only the methods the worker
 // actually calls are declared.
 type Repository interface {
@@ -87,6 +101,7 @@ type Worker struct {
 	storage     Storage
 	resizer     ImageResizer
 	log         *slog.Logger
+	metrics     *metrics.Processing
 	retryDelays []time.Duration
 	thumbSizes  []ThumbnailSize
 }
@@ -108,6 +123,13 @@ func WithRetryDelays(delays []time.Duration) Option {
 // default sizes that match the spec.
 func WithThumbnailSizes(sizes []ThumbnailSize) Option {
 	return func(w *Worker) { w.thumbSizes = sizes }
+}
+
+// WithMetrics attaches the processing metrics recorder. Omitting it leaves
+// w.metrics nil, which the nil-safe recorder treats as a no-op — handy for
+// tests that don't care about metrics.
+func WithMetrics(m *metrics.Processing) Option {
+	return func(w *Worker) { w.metrics = m }
 }
 
 // New constructs a Worker.

@@ -1,0 +1,32 @@
+# OpenTelemetry Collector config. The app sends OTLP/gRPC here; the collector
+# batches and forwards traces to Jaeger. Routing through a collector (rather
+# than app -> Jaeger directly) gives a single egress we can re-point or fan out
+# without touching or redeploying the application.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  # Forward traces to Jaeger's native OTLP receiver.
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  # Surfaces a per-signal summary in the collector logs — handy when verifying
+  # the pipeline locally.
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger, debug]

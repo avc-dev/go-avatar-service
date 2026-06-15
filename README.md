@@ -15,7 +15,8 @@ ID пользователя.
 - MinIO через `minio-go/v7`
 - RabbitMQ через `amqp091-go` (topic-обменник + DLX для terminal-фейлов)
 - Ресайз картинок — `disintegration/imaging` (чистый Go, без CGO)
-- Структурные логи `log/slog`
+- Структурные логи `log/slog` (с корреляцией по `trace_id`)
+- Наблюдаемость: OpenTelemetry-трейсинг → Jaeger, метрики Prometheus + Grafana, логи → Loki, алерты → Alertmanager
 - Конфиг из env (`caarlos0/env/v11`)
 - Тесты — `testify` + `testcontainers-go`, моки через `mockery`
 
@@ -24,7 +25,7 @@ ID пользователя.
 Нужен Docker Desktop (или engine + compose v2).
 
 ```bash
-make up        # поднимет postgres, minio, rabbitmq, migrator, app-server, app-worker
+make up        # весь стек: инфра + app + наблюдаемость (prometheus/grafana/jaeger/loki)
 make ps        # проверить что все контейнеры healthy
 make logs      # хвост логов compose
 ```
@@ -35,6 +36,7 @@ make logs      # хвост логов compose
 - `http://localhost:8080/health` — статус компонентов (200 если всё ок, 503 если что-то отвалилось)
 - `http://localhost:15673/` — RabbitMQ Management UI (guest/guest)
 - `http://localhost:9001/` — MinIO Console (minioadmin/minioadmin)
+- `http://localhost:3000/` — Grafana (дашборды, вход без пароля) — подробнее в разделе [Наблюдаемость](#наблюдаемость)
 
 > ⚠️ Пароли в `compose.yaml` и `.env.example` — это **dev-дефолты**, чтобы
 > можно было собрать стек одной командой. В реальном деплое их нужно убрать
@@ -67,6 +69,57 @@ make run-worker          # терминал B
 Внутри compose сервисы между собой общаются на стандартных портах через
 service-name (`postgres:5432`, `rabbitmq:5672` и т.д.) — это переопределено
 в `compose.yaml` через `environment:` отдельно от `.env`.
+
+## Наблюдаемость
+
+Тот же `make up` поднимает и стек наблюдаемости. Приложение инструментировано
+OpenTelemetry-трейсингом, отдаёт Prometheus-метрики и пишет JSON-логи, которые
+собираются в Loki. Всё сводится в Grafana.
+
+| UI | Адрес | Что там |
+|---|---|---|
+| Grafana | `http://localhost:3000` | дашборды Service Overview + Business KPIs, вход без пароля |
+| Jaeger | `http://localhost:16686` | трейсы; сервисы `gophprofile-server` и `gophprofile-worker` |
+| Prometheus | `http://localhost:9090` | метрики и алерты (Status → Targets, Alerts) |
+| Alertmanager | `http://localhost:9093` | сработавшие алерты |
+
+**Трейсинг.** Каждый запрос — сквозной трейс через все слои: HTTP → сервис →
+Postgres → S3 → RabbitMQ. Загрузка аватарки тянется даже через очередь: спан
+публикации в server и спан обработки в worker склеены в один `trace_id`
+(контекст едет в заголовках сообщения). Приложение шлёт OTLP/gRPC напрямую в
+Jaeger (нативный OTLP-приёмник). Опциональный конфиг OTel Collector лежит в
+`docker/otel-collector-config.yaml`, если захочется добавить коллектор-хоп.
+
+**Метрики.** Prometheus скрейпит `/metrics` сервера и воркера плюс родной
+экспортёр RabbitMQ. Кроме RED-метрик (rate/errors/duration) есть бизнесовые:
+`avatars_uploads_total`, `avatars_upload_duration_seconds`,
+`avatars_processing_total`, `avatars_storage_bytes`.
+
+**Логи.** `slog` пишет JSON в stdout, Grafana Alloy тейлит логи контейнеров и
+шлёт в Loki. В каждую строку внутри спана автоматически добавляются
+`trace_id`/`span_id`, так что из лога в Grafana можно в один клик прыгнуть в
+соответствующий трейс в Jaeger (и наоборот). ТЗ разрешало стек логов на выбор
+(Loki или OpenSearch/ELK) — взяли Loki ради единого окна Grafana на метрики,
+логи и трейсы и заметно меньшего расхода ресурсов на локальном стенде.
+
+**Алерты.** Правила в `docker/prometheus/rules/alerts.yml` — высокий процент
+5xx, медленные загрузки (p95), фейлы обработки, забитая dead-letter очередь,
+упавший таргет. Уходят в Alertmanager.
+
+### Приложение на хосте + трейсинг
+
+Дефолтный OTLP-эндпоинт указывает на `otel-collector:4317` (DNS внутри
+compose). Если гоняешь `make run-server` на хосте — переопредели его или
+выключи трейсинг:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 make run-server   # коллектор опубликован на хост
+OTEL_ENABLED=false make run-server                            # или вообще без трейсинга
+```
+
+Флаги: `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_ENVIRONMENT`,
+`OTEL_TRACES_SAMPLER_RATIO` (1.0 = трейсить всё; имеет смысл понижать под
+нагрузкой).
 
 ## API
 
@@ -102,13 +155,16 @@ internal/
   handlers/    HTTP-хендлеры + health
   httpx/       общие хелперы записи JSON-ответов
   imageproc/   Decode → Fill → JPEG
-  logger/      slog setup
-  middleware/  RequestID-friendly logger и валидатор X-User-ID
+  logger/      slog setup (+ хендлер корреляции с trace_id)
+  metrics/     Prometheus-инструменты (RED, бизнес-метрики, пул, runtime)
+  middleware/  RequestID-friendly logger, валидатор X-User-ID, трейс-спаны
+  observability/ OpenTelemetry: init трейс-провайдера, пропагаторы
   repository/  pgx-обвязка
   services/    use-case оркестрация (сага компенсации в Upload)
   storage/     MinIO-адаптер
   worker/      обработчики событий (идемпотентны через DB-статус)
 migrations/    SQL-миграции
+docker/        конфиги наблюдаемости (collector, prometheus, loki, alloy, grafana)
 tests/         e2e-тест со всеми зависимостями (testcontainers, build tag `integration`)
 web/static/    SPA (один HTML, Tailwind через CDN, vanilla JS)
 ```
@@ -182,8 +238,6 @@ make help                этот список
 - Если воркер упал ровно посреди обработки, запись зависает в статусе
   `processing`. Нужна джоба-сторож, которая возвращает их в `pending` через
   N минут.
-- Валидация MIME через magic bytes, rate limit, CORS — не сделано, ждёт
-  своей очереди.
 - `width`/`height` в metadata — в схеме нет; добавим, если появится
   потребность.
 - CI пока не настроен.

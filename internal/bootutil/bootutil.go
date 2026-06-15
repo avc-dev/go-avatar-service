@@ -12,6 +12,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/exaring/otelpgx"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DefaultProbeTimeout is the timeout applied to each ProbeWithTimeout call
@@ -30,6 +33,24 @@ func ProbeWithTimeout(parent context.Context, timeout time.Duration, label strin
 		return fmt.Errorf("%s: %w", label, err)
 	}
 	return nil
+}
+
+// NewTracedPool builds a pgx connection pool from dsn with the otelpgx tracer
+// attached, so every query issued through it emits a span under the active
+// trace. Both binaries construct their pool this way; the tracer reads the
+// global TracerProvider installed by observability.Init, so it is a no-op until
+// (and unless) tracing is enabled.
+func NewTracedPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse pg dsn: %w", err)
+	}
+	cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create pg pool: %w", err)
+	}
+	return pool, nil
 }
 
 // RedactURL strips the userinfo segment from a URL of the form

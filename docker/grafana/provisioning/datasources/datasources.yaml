@@ -1,0 +1,41 @@
+# Grafana datasources provisioned at startup. Fixed UIDs (prometheus/loki/
+# jaeger) so the provisioned dashboards can reference them deterministically.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Extract trace_id from the JSON log line and turn it into a clickable
+      # link to the matching trace in Jaeger — the log -> trace half of
+      # correlation. (The trace -> log half is configured on the Jaeger ds.)
+      derivedFields:
+        - name: TraceID
+          matcherType: regex
+          matcherRegex: '"trace_id":"([a-f0-9]+)"'
+          url: '${__value.raw}'
+          datasourceUid: jaeger
+
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: true

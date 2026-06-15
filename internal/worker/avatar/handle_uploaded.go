@@ -30,9 +30,16 @@ import (
 // Signature matches broker.Handler so the consumer loop can route deliveries
 // directly to this method without an adapter.
 func (w *Worker) HandleUploaded(ctx context.Context, body []byte, messageID string) error {
+	// status is read by the deferred recorder; default to success and downgrade
+	// it on the skip/failure paths below.
+	start := time.Now()
+	status := statusSuccess
+	defer func() { w.metrics.Record(eventUploaded, status, time.Since(start).Seconds()) }()
+
 	var event domain.AvatarUploadEvent
 	if err := json.Unmarshal(body, &event); err != nil {
 		// Malformed message — retrying won't help; send to DLX immediately.
+		status = statusFailed
 		return fmt.Errorf("worker: unmarshal upload event (msg %s): %w", messageID, err)
 	}
 
@@ -48,10 +55,12 @@ func (w *Worker) HandleUploaded(ctx context.Context, body []byte, messageID stri
 		},
 	); err != nil {
 		if errors.Is(err, repoavatar.ErrNotFound) {
+			status = statusSkipped
 			w.log.Info("worker: upload event not actionable (missing or already claimed)",
 				"avatar_id", event.AvatarID, "message_id", messageID)
 			return nil
 		}
+		status = statusFailed
 		return err
 	}
 
@@ -64,6 +73,7 @@ func (w *Worker) HandleUploaded(ctx context.Context, body []byte, messageID stri
 	// avoid leaving orphans in S3 for the operator to chase down later.
 	thumbs, err := w.generateThumbnails(ctx, event.AvatarID, avatar.S3Key)
 	if err != nil {
+		status = statusFailed
 		w.markFailed(ctx, event.AvatarID, thumbs, err)
 		return fmt.Errorf("worker: generate thumbnails for avatar %s: %w", event.AvatarID, err)
 	}
@@ -77,6 +87,7 @@ func (w *Worker) HandleUploaded(ctx context.Context, body []byte, messageID stri
 		// Thumbnails already uploaded to S3; only the status bump failed. We
 		// return an error so the message goes to DLX — manual reconciliation
 		// will fix the DB state, but the S3 work is not lost.
+		status = statusFailed
 		return fmt.Errorf("worker: mark completed for avatar %s: %w", event.AvatarID, err)
 	}
 

@@ -1,0 +1,80 @@
+groups:
+  - name: avatar-service-http
+    rules:
+      - alert: HighHTTPErrorRate
+        expr: |
+          sum(rate(http_requests_total{code=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "{{ $value | humanizePercentage }} of HTTP requests are 5xx over the last 5m (threshold 10%)."
+
+      - alert: HighHTTPLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP p95 latency is high"
+          description: "p95 request latency is {{ $value | humanizeDuration }} over 5m (threshold 1s)."
+
+  - name: avatar-service-business
+    rules:
+      - alert: HighUploadErrorRate
+        expr: |
+          sum(rate(avatars_uploads_total{status="error"}[5m]))
+            / sum(rate(avatars_uploads_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High avatar upload error rate"
+          description: "{{ $value | humanizePercentage }} of uploads are failing over 5m (threshold 10%)."
+
+      # Corrected form of the spec's example, which was broken:
+      # histogram_quantile must be fed rate() of the _bucket series aggregated
+      # by (le) — not the raw histogram. Without that it returns nothing.
+      - alert: SlowUploadsP95
+        expr: |
+          histogram_quantile(0.95, sum(rate(avatars_upload_duration_seconds_bucket[5m])) by (le)) > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Avatar uploads are slow (p95 > 5s)"
+          description: "p95 upload duration is {{ $value | humanizeDuration }} over 5m (threshold 5s)."
+
+      - alert: HighProcessingFailureRate
+        expr: |
+          sum(rate(avatars_processing_total{status="failed"}[5m]))
+            / sum(rate(avatars_processing_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Worker processing failure rate is high"
+          description: "{{ $value | humanizePercentage }} of worker events fail over 5m (threshold 10%)."
+
+      - alert: DeadLetterBacklog
+        expr: rabbitmq_queue_messages_ready{queue="avatars.dead"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Messages stuck in the dead-letter queue"
+          description: "{{ $value }} message(s) have sat in avatars.dead for >1m — events are being dead-lettered."
+
+  - name: avatar-service-infra
+    rules:
+      - alert: TargetDown
+        expr: up{job=~"avatar-server|avatar-worker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target down: {{ $labels.job }}"
+          description: "{{ $labels.job }} ({{ $labels.instance }}) has been unreachable for >1m."

@@ -3,13 +3,16 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/avc-dev/go-avatar-service/internal/config"
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	handleravatar "github.com/avc-dev/go-avatar-service/internal/handlers/avatar"
+	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	mw "github.com/avc-dev/go-avatar-service/internal/middleware"
 )
 
@@ -33,15 +36,23 @@ func buildRouter(
 	cfg config.SecurityConfig,
 	healthH *handlers.HealthHandler,
 	avatarH *handleravatar.Handler,
+	httpMetrics *metrics.HTTP,
+	metricsHandler http.Handler,
 	staticPath string,
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
+	// SpanName runs early so its deferred rename observes the matched chi route
+	// pattern once the inner chain (routing + handler) has returned.
+	r.Use(mw.SpanName)
 	r.Use(mw.Logger(log))
 	r.Use(chimw.Recoverer)
 	r.Use(mw.CORS(cfg.CORSAllowedOrigins))
 
 	r.Get("/health", healthH.Get)
+	// /metrics is mounted outside the /api/v1 group so it carries neither the
+	// RED middleware (no self-measurement) nor the rate limiter.
+	r.Handle("/metrics", metricsHandler)
 
 	// Root redirects to the SPA so a stray browser hit on `/` lands on the UI
 	// rather than a 404.
@@ -56,6 +67,7 @@ func buildRouter(
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(ipLimit)
+		r.Use(httpMetrics.Middleware)
 		r.Route("/avatars", func(r chi.Router) {
 			r.With(mw.UserID, userLimit).Post("/", avatarH.Upload)
 			r.Get("/{avatar_id}", avatarH.Download)
@@ -69,5 +81,23 @@ func buildRouter(
 		})
 	})
 
-	return r
+	// otelhttp wraps the whole router so every request gets a server span with
+	// W3C trace-context extracted from inbound headers. The filter keeps
+	// operational/static traffic (health probes, SPA assets) out of the trace
+	// stream — they would otherwise dominate it with no diagnostic value.
+	return otelhttp.NewHandler(r, "http.server", otelhttp.WithFilter(traceableRequest))
+}
+
+// traceableRequest reports whether a request should produce a server span. We
+// trace the API surface and skip health checks and static SPA assets.
+func traceableRequest(r *http.Request) bool {
+	p := r.URL.Path
+	switch {
+	case p == "/health", p == "/metrics", p == "/":
+		return false
+	case strings.HasPrefix(p, "/web"):
+		return false
+	default:
+		return true
+	}
 }

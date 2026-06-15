@@ -1,0 +1,15 @@
+# Loads dashboard JSON models from disk. The JSON files are provisioned
+# read-write (allowUiUpdates) so the dashboards can be tweaked in the UI during
+# development, but they always reset to the on-disk version on restart.
+apiVersion: 1
+
+providers:
+  - name: gophprofile
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

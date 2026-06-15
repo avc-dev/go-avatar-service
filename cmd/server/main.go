@@ -11,7 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
@@ -19,10 +20,16 @@ import (
 	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	handleravatar "github.com/avc-dev/go-avatar-service/internal/handlers/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/logger"
+	"github.com/avc-dev/go-avatar-service/internal/metrics"
+	"github.com/avc-dev/go-avatar-service/internal/observability"
 	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
 	svcavatar "github.com/avc-dev/go-avatar-service/internal/services/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 )
+
+// serviceName identifies this binary as a distinct node in the trace graph,
+// separate from the worker (see observability.Init).
+const serviceName = "gophprofile-server"
 
 // healthCheckTimeout bounds the total /health probe (across all components).
 const healthCheckTimeout = 5 * time.Second
@@ -52,13 +59,39 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// --- Observability ---
+
+	shutdownTracing, err := observability.Init(ctx, cfg.Observability, serviceName, log)
+	if err != nil {
+		return fmt.Errorf("init tracing: %w", err)
+	}
+	defer func() {
+		// The shutdown timeout is the caller's call: bound the flush here so a
+		// dead trace backend cannot stall process exit.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			log.Error("tracing shutdown", "err", err)
+		}
+	}()
+
+	// Metrics registry: this binary's own registry (no global default), with
+	// the standard Go/process collectors for the resource-utilisation panels.
+	reg := prometheus.NewRegistry()
+	if err := metrics.RegisterRuntime(reg); err != nil {
+		return fmt.Errorf("register runtime metrics: %w", err)
+	}
+
 	// --- Infrastructure ---
 
-	pool, err := pgxpool.New(ctx, cfg.Postgres.DSN)
+	pool, err := bootutil.NewTracedPool(ctx, cfg.Postgres.DSN)
 	if err != nil {
-		return fmt.Errorf("create pg pool: %w", err)
+		return err
 	}
 	defer pool.Close()
+	if err := metrics.RegisterPool(reg, pool, "server"); err != nil {
+		return fmt.Errorf("register pool metrics: %w", err)
+	}
 
 	if err := bootutil.ProbeWithTimeout(ctx, bootutil.DefaultProbeTimeout, "postgres ping", pool.Ping); err != nil {
 		return err
@@ -92,11 +125,27 @@ func run() error {
 	}()
 	log.Info("rabbitmq connected", "url", bootutil.RedactURL(cfg.RabbitMQ.URL))
 
+	// --- Metrics instruments ---
+
+	httpMetrics, err := metrics.NewHTTP(reg)
+	if err != nil {
+		return fmt.Errorf("build http metrics: %w", err)
+	}
+	uploadMetrics, err := metrics.NewUpload(reg)
+	if err != nil {
+		return fmt.Errorf("build upload metrics: %w", err)
+	}
+	storageMetrics, err := metrics.NewStorage(reg)
+	if err != nil {
+		return fmt.Errorf("build storage metrics: %w", err)
+	}
+	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+
 	// --- Application layer ---
 
 	avatarRepo := repoavatar.NewPostgresRepository(pool)
 	avatarSvc := svcavatar.New(avatarRepo, minioStore, rmq, log)
-	avatarH := handleravatar.NewHandler(avatarSvc, log, cfg.HTTP.MaxUploadBytes)
+	avatarH := handleravatar.NewHandler(avatarSvc, log, cfg.HTTP.MaxUploadBytes, uploadMetrics)
 
 	healthH := handlers.NewHealthHandler(
 		map[string]handlers.HealthChecker{
@@ -107,11 +156,15 @@ func run() error {
 		healthCheckTimeout,
 	)
 
+	// Storage-usage gauge: sample the DB sum periodically rather than at scrape
+	// time, so a slow query can never stall a Prometheus scrape.
+	go sampleStorageBytes(ctx, log, avatarRepo, storageMetrics)
+
 	// --- HTTP server + graceful shutdown ---
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
-		Handler:           buildRouter(log, cfg.Security, healthH, avatarH, staticDir),
+		Handler:           buildRouter(log, cfg.Security, healthH, avatarH, httpMetrics, metricsHandler, staticDir),
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
