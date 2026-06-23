@@ -8,7 +8,9 @@ data:
   HTTP_PORT: "8080"
   SERVER_ADMIN_PORT: "8081"
   WORKER_ADMIN_PORT: "8081"
-  HTTP_MAX_UPLOAD_BYTES: {{ .Values.config.maxUploadBytes | quote }}
+  # int64 first: a bare large number renders in scientific notation (1.04e+07),
+  # which strconv.ParseInt rejects. Force a plain integer string.
+  HTTP_MAX_UPLOAD_BYTES: {{ .Values.config.maxUploadBytes | int64 | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   LOG_FORMAT: {{ .Values.config.logFormat | quote }}
   MINIO_ENDPOINT: {{ include "gophprofile.minioEndpoint" . | quote }}

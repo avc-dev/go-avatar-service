@@ -38,9 +38,22 @@ networkPolicy:
   enabled: false
 
 # Bundled deps on with the default dev creds.
+# Bitnami pulled these tags from docker.io/bitnami in 2025; the images now live
+# under docker.io/bitnamilegacy. Point the subcharts there. allowInsecureImages
+# tells the charts to accept the non-default repository without complaining.
+global:
+  security:
+    allowInsecureImages: true
+
 postgresql:
   enabled: true
+  image:
+    repository: bitnamilegacy/postgresql
 minio:
   enabled: true
+  image:
+    repository: bitnamilegacy/minio
 rabbitmq:
   enabled: true
+  image:
+    repository: bitnamilegacy/rabbitmq

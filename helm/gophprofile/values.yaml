@@ -78,6 +78,8 @@ migrations:
   enabled: true
   image: migrate/migrate
   tag: v4.18.3
+  # migrate/migrate is upstream — pull it (don't inherit the app's Never).
+  pullPolicy: IfNotPresent
 
 secret:
   create: true

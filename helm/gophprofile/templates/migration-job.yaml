@@ -48,7 +48,9 @@ spec:
       containers:
         - name: migrate
           image: "{{ .Values.migrations.image }}:{{ .Values.migrations.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Its own pull policy: migrate/migrate is an upstream image, so it must
+          # be pullable even when the app image is pinned to Never (side-loaded).
+          imagePullPolicy: {{ .Values.migrations.pullPolicy }}
           args:
             - "-path=/migrations"
             - "-database=$(POSTGRES_DSN)"
