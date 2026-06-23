@@ -353,11 +353,6 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: migrate
   annotations:
-    # post-install (not pre-install): on a fresh install the bundled Postgres is
-    # a normal resource, so it only exists after the main phase — a pre-install
-    # hook would have nothing to connect to. pre-upgrade is fine since the DB is
-    # already there by then. The Job retries (backoffLimit) to ride out the few
-    # seconds Postgres needs to accept connections.
     helm.sh/hook: post-install,pre-upgrade
     helm.sh/hook-weight: "-5"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded

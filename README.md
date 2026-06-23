@@ -17,8 +17,51 @@ ID пользователя.
 - Ресайз картинок — `disintegration/imaging` (чистый Go, без CGO)
 - Структурные логи `log/slog` (с корреляцией по `trace_id`)
 - Наблюдаемость: OpenTelemetry-трейсинг → Jaeger, метрики Prometheus + Grafana, логи → Loki, алерты → Alertmanager
+- Circuit breaker (`sony/gobreaker`) на походах в S3 и RabbitMQ — больной бэкенд размыкается быстро, а не копит зависшие запросы
+- OpenAPI-спека (`api/openapi.yaml`) + Swagger UI на `/swagger`
+- Helm-чарт для деплоя в Kubernetes (`helm/gophprofile`)
 - Конфиг из env (`caarlos0/env/v11`)
 - Тесты — `testify` + `testcontainers-go`, моки через `mockery`
+
+## Архитектура
+
+Два процесса из одного образа: `server` (синхронный HTTP) и `worker`
+(асинхронная обработка очереди). Связаны через Postgres (метаданные), MinIO
+(файлы) и RabbitMQ (события). Загрузка отвечает клиенту сразу со статусом
+`processing`, миниатюры досчитываются в фоне.
+
+```mermaid
+flowchart LR
+  client["Внешний сервис / SPA"] -->|HTTP| server["server :8080"]
+  server -->|метаданные| pg[("Postgres")]
+  server -->|оригинал| s3[("MinIO / S3")]
+  server -->|"avatar.uploaded"| mq(["RabbitMQ"])
+  mq --> worker["worker"]
+  worker -->|читает оригинал| s3
+  worker -->|пишет миниатюры 100×100, 300×300| s3
+  worker -->|статус → done| pg
+```
+
+В Kubernetes тот же образ разворачивается двумя Deployment'ами под общими
+ConfigMap/Secret. Снаружи — Ingress на `server`, метрики обоих процессов
+собирает Prometheus через ServiceMonitor с admin-порта `8081`.
+
+```mermaid
+flowchart TB
+  ext["Внешний трафик"] --> ing["Ingress (nginx)"]
+  ing --> svcS["Service server :80→8080"]
+  svcS --> depS["Deployment server (HPA 2…10)"]
+  depW["Deployment worker (HPA 2…10)"]
+  hook["Job миграций (helm hook)"] -.->|up| pg[("Postgres")]
+  depS & depW --> pg & minio[("MinIO")] & rmq(["RabbitMQ"])
+  prom["Prometheus"] -->|"/metrics :8081"| svcS
+  prom -->|"/metrics :8081"| svcW["Service worker"] --> depW
+```
+
+Зависимости (Postgres/MinIO/RabbitMQ) в локальном чарте поднимаются
+Bitnami-сабчартами; в проде выключаются — подключаешь управляемые сервисы
+через `values-prod.yaml`. Подробнее — в разделе
+[Деплой в Kubernetes](#деплой-в-kubernetes-helm).
 
 ## Как запустить — всё в Docker
 
@@ -33,7 +76,9 @@ make logs      # хвост логов compose
 После старта:
 
 - `http://localhost:8080/web/` — веб-интерфейс (загружай/смотри/удаляй аватарки)
-- `http://localhost:8080/health` — статус компонентов (200 если всё ок, 503 если что-то отвалилось)
+- `http://localhost:8080/swagger` — Swagger UI по OpenAPI-спеке
+- `http://localhost:8081/health` — статус компонентов (200 если всё ок, 503 если что-то отвалилось)
+- `http://localhost:8081/metrics` — Prometheus-метрики сервера
 - `http://localhost:15673/` — RabbitMQ Management UI (guest/guest)
 - `http://localhost:9001/` — MinIO Console (minioadmin/minioadmin)
 - `http://localhost:3000/` — Grafana (дашборды, вход без пароля) — подробнее в разделе [Наблюдаемость](#наблюдаемость)
@@ -121,6 +166,67 @@ OTEL_ENABLED=false make run-server                            # или вооб�
 `OTEL_TRACES_SAMPLER_RATIO` (1.0 = трейсить всё; имеет смысл понижать под
 нагрузкой).
 
+## Деплой в Kubernetes (Helm)
+
+Чарт лежит в `helm/gophprofile`. Разворачивает два Deployment'а (server +
+worker), Service, Ingress, HPA на оба, ConfigMap/Secret, NetworkPolicy,
+ServiceMonitor и хук-Job миграций. Зависимости (Postgres/MinIO/RabbitMQ) —
+Bitnami-сабчарты, включены в `values-local.yaml` и выключены в
+`values-prod.yaml`.
+
+### Что нужно в кластере
+
+Проверялось на **Rancher Desktop** (k8s включён, движок dockerd). В кластере
+понадобятся:
+
+- **ingress-nginx** — k3s по умолчанию ставит Traefik, его нужно выключить
+  (Rancher Desktop → Preferences → Kubernetes → снять Traefik) и поставить
+  ingress-nginx, иначе аннотации `nginx.ingress.kubernetes.io/*` ни на что не
+  влияют.
+- **kube-prometheus-stack** — даёт CRD `ServiceMonitor` и сам Prometheus.
+  Лейбл, по которому он подхватывает ServiceMonitor'ы, задаётся в
+  `serviceMonitor.labels` (в `values-prod.yaml` это `release: kube-prometheus-stack`).
+- **Локальный registry** — образ собирается локально, а встроенный k3s читает
+  не из docker, а из своего хранилища. Проще всего поднять registry и пушить
+  туда:
+  ```bash
+  docker run -d -p 5000:5000 --name registry registry:2
+  docker build -t localhost:5000/gophprofile-app:local .
+  docker push localhost:5000/gophprofile-app:local
+  ```
+
+### Установка (локально)
+
+```bash
+cd helm/gophprofile
+helm dependency build                 # подтянуть Bitnami-сабчарты
+tar xzf charts/*.tgz -C charts/       # helm v4 хочет распакованные сабчарты
+cd ../..
+
+helm upgrade --install gophprofile helm/gophprofile \
+  -f helm/gophprofile/values-local.yaml \
+  --set image.repository=localhost:5000/gophprofile-app \
+  --namespace gophprofile --create-namespace
+
+kubectl -n gophprofile rollout status deploy/gophprofile-server
+```
+
+Ingress по умолчанию слушает `avatars.localtest.me` (этот домен резолвится в
+`127.0.0.1` сам, в `/etc/hosts` лезть не нужно) — открой
+`http://avatars.localtest.me/web/`.
+
+### Прод
+
+`values-prod.yaml` выключает Bitnami-сабчарты и ждёт внешние managed-сервисы:
+DSN/ключи кладёшь в Secret заранее и указываешь его в `secret.existingSecret`,
+а несекретный `MINIO_ENDPOINT` — в `externalMinio.endpoint`. Там же включены
+HPA, NetworkPolicy и TLS на Ingress.
+
+Миграции гоняет хук-Job (`post-install,pre-upgrade`): SQL запечён в образ,
+initContainer копирует его в общий том, дальше `migrate/migrate ... up`.
+Отрендеренные манифесты для обоих окружений — в `k8s/rendered/` (удобно
+глянуть «сырой» YAML без шаблонов Helm).
+
 ## API
 
 | Метод | Путь | Auth | Что делает |
@@ -133,8 +239,13 @@ OTEL_ENABLED=false make run-server                            # или вооб�
 | `GET` | `/api/v1/users/{user_id}/avatar` | — | Стрим текущей (последней) аватарки пользователя |
 | `GET` | `/api/v1/users/{user_id}/avatars` | — | Список всех неудалённых аватарок пользователя |
 | `DELETE` | `/api/v1/users/{user_id}/avatar` | `X-User-ID == user_id` | Удалить текущую аватарку |
-| `GET` | `/health` | — | Статус Postgres/MinIO/RabbitMQ |
+| `GET` | `/swagger` | — | Swagger UI (спека — `/swagger/openapi.yaml`) |
 | `GET` | `/web/*` | — | Статика SPA |
+
+`/health` и `/metrics` живут на отдельном admin-порту (`8081`), а не на
+публичном `8080`. В k8s это держит пробы и скрейп Prometheus в стороне от
+Ingress; локально оба порта проброшены в compose, так что `curl
+localhost:8081/health` работает.
 
 `X-User-ID` принимается **только в формате UUID v7**. Middleware режет
 любой другой UUID c 400. Та же проверка применяется к `{user_id}` в пути.
@@ -149,7 +260,8 @@ cmd/
   server/      HTTP-сервер
   worker/      обработчик очереди
 internal/
-  broker/      Publisher + Consumer для RabbitMQ (плюс NoOp для тестов)
+  adminhttp/   admin-роутер (/health, /metrics) — общий для server и worker
+  broker/      Publisher + Consumer для RabbitMQ
   config/      env-конфиг
   domain/      Avatar и доменные события
   handlers/    HTTP-хендлеры + health
@@ -160,10 +272,14 @@ internal/
   middleware/  RequestID-friendly logger, валидатор X-User-ID, трейс-спаны
   observability/ OpenTelemetry: init трейс-провайдера, пропагаторы
   repository/  pgx-обвязка
+  resilience/  circuit breaker'ы вокруг S3 и RabbitMQ
   services/    use-case оркестрация (сага компенсации в Upload)
   storage/     MinIO-адаптер
   worker/      обработчики событий (идемпотентны через DB-статус)
+api/           OpenAPI-спека (embed в бинарь, отдаётся на /swagger)
 migrations/    SQL-миграции
+helm/          Helm-чарт gophprofile (деплой в k8s)
+k8s/           отрендеренные манифесты (helm template) для ревью
 docker/        конфиги наблюдаемости (collector, prometheus, loki, alloy, grafana)
 tests/         e2e-тест со всеми зависимостями (testcontainers, build tag `integration`)
 web/static/    SPA (один HTML, Tailwind через CDN, vanilla JS)
@@ -201,6 +317,9 @@ make lint                golangci-lint
 make mocks               перегенерить моки через mockery
 make build               собрать бинарники в bin/
 make docker-build        собрать app-image без запуска
+make helm-deps           подтянуть и распаковать Bitnami-сабчарты
+make helm-lint           прогнать helm lint (default + prod)
+make helm-template       отрендерить манифесты в k8s/rendered/
 make help                этот список
 ```
 
@@ -221,6 +340,11 @@ make help                этот список
   brew install golangci-lint
   # или
   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+  ```
+- `helm` v3+ и доступ к кластеру (`kubectl`) — только если будешь деплоить в
+  k8s (см. [Деплой в Kubernetes](#деплой-в-kubernetes-helm)):
+  ```
+  brew install helm
   ```
 
 В compose ничего из этого не требуется — migrator там отдельный one-shot

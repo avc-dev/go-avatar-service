@@ -120,7 +120,8 @@ services:
     container_name: gophprofile-app-server
     # Uses Dockerfile's CMD (/usr/local/bin/server) — no override needed.
     ports:
-      - "8080:8080"
+      - "8080:8080"   # public API + SPA
+      - "8081:8081"   # admin: /health, /metrics (handy to curl locally)
     healthcheck:
       # busybox wget --spider returns non-zero on non-2xx responses; perfect
       # for our /health which is 200 (all green) or 503 (degraded). /health now
