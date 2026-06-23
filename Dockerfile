@@ -37,6 +37,9 @@ WORKDIR /app
 COPY --from=builder /out/server /usr/local/bin/server
 COPY --from=builder /out/worker /usr/local/bin/worker
 COPY --from=builder /src/web /app/web
+# SQL migrations ride along so the k8s migration hook can copy them into a shared
+# volume for the migrate/migrate job — keeps one source of truth for the schema.
+COPY --from=builder /src/migrations /app/migrations
 
 USER app
 

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gophprofile.fullname" . }}
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+data:
+  HTTP_PORT: "8080"
+  SERVER_ADMIN_PORT: "8081"
+  WORKER_ADMIN_PORT: "8081"
+  HTTP_MAX_UPLOAD_BYTES: {{ .Values.config.maxUploadBytes | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  MINIO_ENDPOINT: {{ include "gophprofile.minioEndpoint" . | quote }}
+  MINIO_BUCKET: {{ .Values.config.minioBucket | quote }}
+  MINIO_USE_SSL: {{ .Values.config.minioUseSSL | quote }}
+  RABBITMQ_EXCHANGE: {{ .Values.config.rabbitmqExchange | quote }}
+  OTEL_ENABLED: {{ .Values.config.otel.enabled | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otel.endpoint | quote }}
+  OTEL_ENVIRONMENT: {{ .Values.config.otel.environment | quote }}
+  OTEL_TRACES_SAMPLER_RATIO: {{ .Values.config.otel.sampleRatio | quote }}
+  CORS_ALLOWED_ORIGINS: {{ .Values.config.cors | quote }}
+  RATE_LIMIT_READ_PER_MIN: {{ .Values.config.rateLimitRead | quote }}
+  RATE_LIMIT_WRITE_PER_MIN: {{ .Values.config.rateLimitWrite | quote }}
+  BREAKER_MAX_REQUESTS: {{ .Values.config.breaker.maxRequests | quote }}
+  BREAKER_INTERVAL: {{ .Values.config.breaker.interval | quote }}
+  BREAKER_TIMEOUT: {{ .Values.config.breaker.timeout | quote }}
+  BREAKER_MIN_REQUESTS: {{ .Values.config.breaker.minRequests | quote }}
+  BREAKER_FAILURE_RATIO: {{ .Values.config.breaker.failureRatio | quote }}

@@ -1,0 +1,46 @@
+# Local cluster (kind/minikube). Image is side-loaded, so never pull.
+image:
+  tag: local
+  pullPolicy: Never
+
+server:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+
+worker:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+
+ingress:
+  enabled: true
+  host: avatars.localtest.me
+
+serviceMonitor:
+  enabled: true
+
+networkPolicy:
+  enabled: false
+
+# Bundled deps on with the default dev creds.
+postgresql:
+  enabled: true
+minio:
+  enabled: true
+rabbitmq:
+  enabled: true

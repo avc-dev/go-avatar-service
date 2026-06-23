@@ -1,0 +1,142 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: gophprofile-app
+  tag: "local"
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+
+server:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    cpu: 70
+    memory: 80
+
+worker:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    cpu: 70
+    memory: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  host: avatars.local
+  path: /
+  pathType: Prefix
+  annotations:
+    # Keep >= config.maxUploadBytes (10485760) so nginx doesn't reject uploads
+    # before the app's own limit kicks in. 11m covers 10 MiB with headroom.
+    proxyBodySize: 11m
+  extraAnnotations: {}
+  # tls:
+  #   - secretName: avatars-tls
+  #     hosts: [avatars.local]
+  tls: []
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  # kube-prometheus-stack usually only selects ServiceMonitors carrying its own
+  # release label, e.g. {release: kube-prometheus-stack}. Set that here.
+  labels: {}
+
+networkPolicy:
+  enabled: false
+  ingressNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  monitoringNamespaceSelector:
+    kubernetes.io/metadata.name: monitoring
+  dependenciesNamespaceSelector:
+    kubernetes.io/metadata.name: default
+
+migrations:
+  enabled: true
+  image: migrate/migrate
+  tag: v4.18.3
+
+secret:
+  create: true
+  existingSecret: ""
+
+# Non-secret app config (env). See internal/config/config.go for semantics.
+config:
+  logLevel: info
+  logFormat: json
+  maxUploadBytes: 10485760
+  minioBucket: avatars
+  minioUseSSL: false
+  rabbitmqExchange: avatars.exchange
+  otel:
+    # Off by default. The app falls back to a no-op tracer with zero cost.
+    # To enable tracing: set enabled true and point endpoint at a collector
+    # (host:port, OTLP/gRPC).
+    enabled: false
+    endpoint: ""
+    environment: k8s
+    sampleRatio: 1.0
+  cors: ""
+  rateLimitRead: 100
+  rateLimitWrite: 10
+  breaker:
+    maxRequests: 3
+    interval: 30s
+    timeout: 15s
+    minRequests: 5
+    failureRatio: 0.6
+
+# --- Bundled dependencies (Bitnami subcharts) ---
+# Enabled by default with local dev creds. _helpers.tpl computes the secret
+# values to match these. Disable in prod and use external* + secret.existingSecret.
+postgresql:
+  enabled: true
+  auth:
+    username: avatars
+    password: avatars
+    database: avatars
+
+minio:
+  enabled: true
+  auth:
+    rootUser: minioadmin
+    rootPassword: minioadmin
+
+rabbitmq:
+  enabled: true
+  auth:
+    username: user
+    password: changeme
+
+# Used when the matching subchart is disabled.
+externalPostgres:
+  dsn: ""
+externalMinio:
+  endpoint: ""
+  accessKey: ""
+  secretKey: ""
+externalRabbitmq:
+  url: ""

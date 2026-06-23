@@ -1,0 +1,423 @@
+---
+# Source: gophprofile/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gophprofile
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+# App never calls the k8s API, so don't mount a token.
+automountServiceAccountToken: false
+
+---
+---
+# Source: gophprofile/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gophprofile
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+type: Opaque
+stringData:
+  POSTGRES_DSN: "postgres://avatars:avatars@gophprofile-postgresql:5432/avatars?sslmode=disable"
+  MINIO_ACCESS_KEY: "minioadmin"
+  MINIO_SECRET_KEY: "minioadmin"
+  RABBITMQ_URL: "amqp://user:changeme@gophprofile-rabbitmq:5672/"
+
+---
+---
+# Source: gophprofile/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gophprofile
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+data:
+  HTTP_PORT: "8080"
+  SERVER_ADMIN_PORT: "8081"
+  WORKER_ADMIN_PORT: "8081"
+  HTTP_MAX_UPLOAD_BYTES: "1.048576e+07"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  MINIO_ENDPOINT: "gophprofile-minio:9000"
+  MINIO_BUCKET: "avatars"
+  MINIO_USE_SSL: "false"
+  RABBITMQ_EXCHANGE: "avatars.exchange"
+  OTEL_ENABLED: "false"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+  OTEL_ENVIRONMENT: "k8s"
+  OTEL_TRACES_SAMPLER_RATIO: "1"
+  CORS_ALLOWED_ORIGINS: ""
+  RATE_LIMIT_READ_PER_MIN: "100"
+  RATE_LIMIT_WRITE_PER_MIN: "10"
+  BREAKER_MAX_REQUESTS: "3"
+  BREAKER_INTERVAL: "30s"
+  BREAKER_TIMEOUT: "15s"
+  BREAKER_MIN_REQUESTS: "5"
+  BREAKER_FAILURE_RATIO: "0.6"
+
+---
+---
+# Source: gophprofile/templates/service-server.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-server
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: server
+    # Shared label the ServiceMonitor selects on (server + worker).
+    gophprofile.io/scrape: metrics
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 8081
+      targetPort: metrics
+
+---
+---
+# Source: gophprofile/templates/service-worker.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-worker
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: worker
+    # Worker has no public surface — this Service exists only for metrics scrape.
+    gophprofile.io/scrape: metrics
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/component: worker
+  ports:
+    - name: metrics
+      port: 8081
+      targetPort: metrics
+
+---
+---
+# Source: gophprofile/templates/deployment-server.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-server
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gophprofile
+      app.kubernetes.io/instance: gophprofile
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: gophprofile-0.1.0
+        app.kubernetes.io/name: gophprofile
+        app.kubernetes.io/instance: gophprofile
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: server
+    spec:
+      serviceAccountName: gophprofile
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: "gophprofile-app:local"
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: gophprofile
+            - secretRef:
+                name: gophprofile
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 250m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+
+---
+---
+# Source: gophprofile/templates/deployment-worker.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-worker
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gophprofile
+      app.kubernetes.io/instance: gophprofile
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: gophprofile-0.1.0
+        app.kubernetes.io/name: gophprofile
+        app.kubernetes.io/instance: gophprofile
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: gophprofile
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: "gophprofile-app:local"
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/worker"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: metrics
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: gophprofile
+            - secretRef:
+                name: gophprofile
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 250m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+
+---
+---
+# Source: gophprofile/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gophprofile
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "11m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: "avatars.localtest.me"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gophprofile-server
+                port:
+                  name: http
+
+---
+---
+# Source: gophprofile/templates/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gophprofile
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  # Picks up both the server and worker Services via the shared scrape label.
+  selector:
+    matchLabels:
+      gophprofile.io/scrape: metrics
+      app.kubernetes.io/instance: gophprofile
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+---
+# Source: gophprofile/templates/migration-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gophprofile-migrate
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: migrate
+  annotations:
+    # post-install (not pre-install): on a fresh install the bundled Postgres is
+    # a normal resource, so it only exists after the main phase — a pre-install
+    # hook would have nothing to connect to. pre-upgrade is fine since the DB is
+    # already there by then. The Job retries (backoffLimit) to ride out the few
+    # seconds Postgres needs to accept connections.
+    helm.sh/hook: post-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gophprofile
+        app.kubernetes.io/instance: gophprofile
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: gophprofile
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: migrations
+          emptyDir: {}
+      # Copy the SQL out of the app image so migrate/migrate has one source of truth.
+      initContainers:
+        - name: copy-migrations
+          image: "gophprofile-app:local"
+          imagePullPolicy: Never
+          command: ["sh", "-c", "cp -r /app/migrations/* /migrations/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      containers:
+        - name: migrate
+          image: "migrate/migrate:v4.18.3"
+          imagePullPolicy: Never
+          args:
+            - "-path=/migrations"
+            - "-database=$(POSTGRES_DSN)"
+            - "up"
+          env:
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile
+                  key: POSTGRES_DSN
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+
