@@ -1,0 +1,20 @@
+apiVersion: v2
+name: gophprofile
+description: GophProfile avatar microservice (server + worker)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: postgresql
+    version: "16.2.1"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: minio
+    version: "14.7.5"
+    repository: https://charts.bitnami.com/bitnami
+    condition: minio.enabled
+  - name: rabbitmq
+    version: "14.7.0"
+    repository: https://charts.bitnami.com/bitnami
+    condition: rabbitmq.enabled

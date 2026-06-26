@@ -1,0 +1,524 @@
+openapi: 3.0.3
+info:
+  title: GophProfile Avatar Service API
+  version: 1.0.0
+  description: |
+    Avatar service: users upload an image once, other platforms fetch it later.
+    The original is kept in S3, thumbnails are rendered asynchronously, and any
+    variant is served back as raw image bytes.
+
+    Business endpoints live under `/api/v1`. Uploads and deletes need an
+    `X-User-ID` header (UUID v7); reads are open but rate-limited per IP. Errors
+    use one JSON shape (`ErrorResponse`); the 413 and 415 upload responses add a
+    couple of extra fields.
+
+servers:
+  - url: /
+
+tags:
+  - name: avatars
+    description: Upload, download, metadata and delete by avatar id.
+  - name: users
+    description: A user's current avatar and their list of avatars.
+  - name: operational
+    description: Health probe.
+
+paths:
+  /api/v1/avatars:
+    post:
+      tags: [avatars]
+      operationId: uploadAvatar
+      summary: Upload a new avatar
+      description: |
+        Send the image as multipart/form-data in the `file` field. The type is
+        decided by sniffing the file's magic bytes, not by the Content-Type or
+        the filename — jpeg, png, gif and webp are accepted. The response comes
+        back with status `processing`; thumbnails are built in the background.
+      parameters:
+        - $ref: '#/components/parameters/XUserID'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Created; thumbnail processing queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          description: Bad X-User-ID, malformed multipart body, or no `file` field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: File is larger than the allowed maximum.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileTooLargeResponse'
+        '415':
+          description: Sniffed type isn't an image we accept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnsupportedMediaTypeResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/avatars/{avatar_id}:
+    get:
+      tags: [avatars]
+      operationId: downloadAvatar
+      summary: Download avatar bytes
+      description: |
+        Returns the image bytes. Without `size` (or `size=original`) you get the
+        original upload in its original format. Any other `size` is treated as a
+        thumbnail key (e.g. `100x100`) and 404s if that thumbnail isn't ready
+        yet. `format` is accepted but ignored — thumbnails are always JPEG.
+      parameters:
+        - $ref: '#/components/parameters/AvatarIDPath'
+        - name: size
+          in: query
+          required: false
+          description: Empty/`original` for the upload, otherwise a thumbnail key.
+          schema:
+            type: string
+            example: 100x100
+        - name: format
+          in: query
+          required: false
+          description: Ignored for now.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Image bytes.
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: '`avatar_id` is not a valid UUID.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [avatars]
+      operationId: deleteAvatar
+      summary: Delete an avatar by id
+      description: Deletes the avatar. The caller (X-User-ID) must own it.
+      parameters:
+        - $ref: '#/components/parameters/XUserID'
+        - $ref: '#/components/parameters/AvatarIDPath'
+      responses:
+        '204':
+          description: Deleted.
+        '400':
+          description: Bad X-User-ID or avatar_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/avatars/{avatar_id}/metadata:
+    get:
+      tags: [avatars]
+      operationId: getAvatarMetadata
+      summary: Get avatar metadata
+      description: Metadata for one avatar, including which thumbnail sizes exist.
+      parameters:
+        - $ref: '#/components/parameters/AvatarIDPath'
+      responses:
+        '200':
+          description: Metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetadataResponse'
+        '400':
+          description: '`avatar_id` is not a valid UUID.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{user_id}/avatar:
+    get:
+      tags: [users]
+      operationId: getUserCurrentAvatar
+      summary: Download a user's current avatar
+      description: |
+        Bytes of the user's current (latest) avatar. There's no placeholder — if
+        the user has none, you get a 404 and the client picks its own default.
+      parameters:
+        - $ref: '#/components/parameters/UserIDPath'
+      responses:
+        '200':
+          description: Current avatar bytes.
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: '`user_id` is not a valid UUID v7.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User has no current avatar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [users]
+      operationId: deleteUserCurrentAvatar
+      summary: Delete a user's current avatar
+      description: |
+        Deletes the user's current avatar. X-User-ID must match the `user_id` in
+        the path — you can only delete your own.
+      parameters:
+        - $ref: '#/components/parameters/XUserID'
+        - $ref: '#/components/parameters/UserIDPath'
+      responses:
+        '204':
+          description: Deleted.
+        '400':
+          description: Bad X-User-ID or user_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: X-User-ID doesn't match the path user_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{user_id}/avatars:
+    get:
+      tags: [users]
+      operationId: listUserAvatars
+      summary: List a user's avatars
+      description: All of the user's avatars. The `avatars` array is empty if none.
+      parameters:
+        - $ref: '#/components/parameters/UserIDPath'
+      responses:
+        '200':
+          description: The user's avatars.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '400':
+          description: '`user_id` is not a valid UUID v7.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /health:
+    get:
+      tags: [operational]
+      operationId: getHealth
+      summary: Health probe
+      description: |
+        Pings postgres, minio and rabbitmq in parallel. 200 `ok` when all pass,
+        503 `degraded` when any fails (each component reports `ok` or
+        `error: <message>`). Lives on the admin port, outside `/api/v1`.
+      responses:
+        '200':
+          description: All components healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: At least one component is down.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  parameters:
+    XUserID:
+      name: X-User-ID
+      in: header
+      required: true
+      description: Calling user's id (UUID v7). Required for uploads and deletes.
+      schema:
+        type: string
+        format: uuid
+        example: 0192a3b4-c5d6-7e8f-9012-3456789abcde
+    AvatarIDPath:
+      name: avatar_id
+      in: path
+      required: true
+      description: Avatar id (UUID).
+      schema:
+        type: string
+        format: uuid
+    UserIDPath:
+      name: user_id
+      in: path
+      required: true
+      description: User id (UUID v7).
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    RetryAfter:
+      description: How long to wait before retrying, in seconds.
+      schema:
+        type: integer
+        example: 60
+
+  responses:
+    NotFound:
+      description: Not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Avatar not found
+    Forbidden:
+      description: Caller doesn't own this avatar.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Forbidden
+    RateLimited:
+      description: Too many requests.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Rate limit exceeded
+    InternalError:
+      description: Something went wrong on our side.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Internal error
+
+  schemas:
+    ErrorResponse:
+      type: object
+      description: The error shape used across the API.
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: Avatar not found
+        details:
+          type: string
+          description: Extra context when there is some; omitted otherwise.
+
+    UploadResponse:
+      type: object
+      required: [id, user_id, url, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          description: Relative download URL for the original.
+          example: /api/v1/avatars/0192a3b4-c5d6-7e8f-9012-3456789abcde
+        status:
+          type: string
+          description: Right after upload this is always "processing".
+          example: processing
+        created_at:
+          type: string
+          format: date-time
+
+    MetadataResponse:
+      type: object
+      description: One avatar's metadata; also each item in ListResponse.
+      required: [id, user_id, file_name, mime_type, size, thumbnails, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        file_name:
+          type: string
+          description: Original filename as uploaded.
+        mime_type:
+          type: string
+          example: image/png
+        size:
+          type: integer
+          format: int64
+          description: Original size in bytes.
+        thumbnails:
+          type: array
+          description: Rendered thumbnails. Present but empty until processing finishes.
+          items:
+            $ref: '#/components/schemas/ThumbnailEntry'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ThumbnailEntry:
+      type: object
+      required: [size, url]
+      properties:
+        size:
+          type: string
+          example: 100x100
+        url:
+          type: string
+          example: /api/v1/avatars/0192a3b4-c5d6-7e8f-9012-3456789abcde?size=100x100
+
+    ListResponse:
+      type: object
+      required: [avatars]
+      properties:
+        avatars:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetadataResponse'
+
+    FileTooLargeResponse:
+      type: object
+      required: [error, max_size]
+      properties:
+        error:
+          type: string
+          example: File too large
+        max_size:
+          type: integer
+          format: int64
+          description: Allowed maximum, in bytes.
+
+    UnsupportedMediaTypeResponse:
+      type: object
+      required: [error, detected_mime, allowed]
+      properties:
+        error:
+          type: string
+          example: Unsupported image type
+        detected_mime:
+          type: string
+          description: What the magic-byte sniff actually saw.
+          example: text/plain; charset=utf-8
+        allowed:
+          type: array
+          items:
+            type: string
+          example:
+            - image/jpeg
+            - image/png
+            - image/gif
+            - image/webp
+
+    HealthResponse:
+      type: object
+      required: [status, components]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        components:
+          type: object
+          description: 'Per-component status — "ok" or "error: <message>".'
+          additionalProperties:
+            type: string
+          example:
+            postgres: ok
+            minio: ok
+            rabbitmq: ok

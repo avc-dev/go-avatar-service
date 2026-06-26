@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/avc-dev/go-avatar-service/internal/adminhttp"
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
@@ -24,6 +25,7 @@ import (
 	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	"github.com/avc-dev/go-avatar-service/internal/observability"
 	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
+	"github.com/avc-dev/go-avatar-service/internal/resilience"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 	workeravatar "github.com/avc-dev/go-avatar-service/internal/worker/avatar"
 )
@@ -125,7 +127,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("build processing metrics: %w", err)
 	}
-	w := workeravatar.New(repo, minioStore, resizer, log, workeravatar.WithMetrics(procMetrics))
+	// Breaker in front of storage so a sick MinIO trips fast instead of stalling
+	// every thumbnail job. The health handler still uses the raw minioStore — a
+	// probe needs to reach the real backend.
+	guardedStorage := resilience.NewStorage(minioStore, cfg.Resilience.BreakerSettings(), log)
+	w := workeravatar.New(repo, guardedStorage, resizer, log, workeravatar.WithMetrics(procMetrics))
 
 	// --- Consumer loop + admin server, all under one errgroup ---
 
@@ -147,7 +153,7 @@ func run() error {
 	)
 	adminSrv := &http.Server{
 		Addr:              ":" + cfg.HTTP.WorkerAdminPort,
-		Handler:           buildAdminRouter(healthH, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})),
+		Handler:           adminhttp.Router(healthH, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})),
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 	}
 	g.Go(func() error {

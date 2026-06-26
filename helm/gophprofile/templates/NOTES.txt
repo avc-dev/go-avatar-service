@@ -1,0 +1,17 @@
+GophProfile is installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+Check the rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "gophprofile.fullname" . }}-server
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "gophprofile.fullname" . }}-worker
+
+{{- if .Values.ingress.enabled }}
+
+Reach the API/SPA via the ingress:
+  http://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+(point {{ .Values.ingress.host }} at your ingress controller, e.g. add it to /etc/hosts)
+{{- else }}
+
+Ingress is disabled. Port-forward to reach the API:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gophprofile.fullname" . }}-server 8080:80
+  open http://localhost:8080/web/
+{{- end }}

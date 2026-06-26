@@ -1,0 +1,8 @@
+.git/
+.gitignore
+*.tmp
+*.bak
+*.swp
+.DS_Store
+charts/*.tgz
+ci/
