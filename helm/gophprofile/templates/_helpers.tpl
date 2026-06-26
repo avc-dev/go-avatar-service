@@ -72,10 +72,51 @@ or an existing one the operator points us at.
 {{- define "gophprofile.postgresDSN" -}}
 {{- if .Values.postgresql.enabled -}}
 {{- $a := .Values.postgresql.auth -}}
-{{- printf "postgres://%s:%s@%s:5432/%s?sslmode=disable" $a.username $a.password (include "gophprofile.postgresHost" .) $a.database -}}
+{{- $ssl := .Values.postgresql.sslMode | default "disable" -}}
+{{- printf "postgres://%s:%s@%s:5432/%s?sslmode=%s" $a.username $a.password (include "gophprofile.postgresHost" .) $a.database $ssl -}}
 {{- else -}}
 {{- required "externalPostgres.dsn is required when postgresql.enabled is false" .Values.externalPostgres.dsn -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Migration init containers for the server and worker pods: copy-migrations pulls
+the SQL out of the app image into a shared volume, then migrate runs it. As an
+initContainer the app waits for the schema, so no pod serves an empty DB. Retries
+on its own until Postgres is up; safe to run from several pods at once (migrate
+takes an advisory lock). Needs a `migrations` emptyDir volume on the pod.
+*/}}
+{{- define "gophprofile.migrationInitContainers" -}}
+- name: copy-migrations
+  image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+  imagePullPolicy: {{ .Values.image.pullPolicy }}
+  command: ["sh", "-c", "cp -r /app/migrations/* /migrations/"]
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  volumeMounts:
+    - name: migrations
+      mountPath: /migrations
+- name: migrate
+  image: "{{ .Values.migrations.image }}:{{ .Values.migrations.tag }}"
+  imagePullPolicy: {{ .Values.migrations.pullPolicy }}
+  args: ["-path=/migrations", "-database=$(POSTGRES_DSN)", "up"]
+  env:
+    - name: POSTGRES_DSN
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "gophprofile.secretName" . }}
+          key: POSTGRES_DSN
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  volumeMounts:
+    - name: migrations
+      mountPath: /migrations
 {{- end -}}
 
 {{- define "gophprofile.minioAccessKey" -}}

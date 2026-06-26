@@ -116,6 +116,9 @@ config:
 # values to match these. Disable in prod and use external* + secret.existingSecret.
 postgresql:
   enabled: true
+  # sslMode goes into the DSN we build for the bundled DB. Pod-network traffic
+  # is fine on disable; set require for a managed Postgres that enforces TLS.
+  sslMode: disable
   auth:
     username: avatars
     password: avatars

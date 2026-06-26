@@ -61,9 +61,7 @@ helm-lint: ## Lint the Helm chart (default + prod values)
 	helm lint $(HELM_CHART)
 	helm lint $(HELM_CHART) -f $(HELM_CHART)/values-prod.yaml
 
-helm-template: ## Render chart manifests for both envs into k8s/rendered/
+helm-template: ## Render chart manifests for both envs into k8s/rendered/ (Secret stripped)
 	@mkdir -p k8s/rendered
-	helm template gophprofile $(HELM_CHART) -f $(HELM_CHART)/values-local.yaml | \
-		awk '/^# Source: /{keep=($$0 ~ "gophprofile/templates/"); if(keep) print "---"} keep{print}' > k8s/rendered/local.yaml
-	helm template gophprofile $(HELM_CHART) -f $(HELM_CHART)/values-prod.yaml | \
-		awk '/^# Source: /{keep=($$0 ~ "gophprofile/templates/"); if(keep) print "---"} keep{print}' > k8s/rendered/prod.yaml
+	helm template gophprofile $(HELM_CHART) -f $(HELM_CHART)/values-local.yaml | awk -f scripts/helm-render.awk > k8s/rendered/local.yaml
+	helm template gophprofile $(HELM_CHART) -f $(HELM_CHART)/values-prod.yaml | awk -f scripts/helm-render.awk > k8s/rendered/prod.yaml

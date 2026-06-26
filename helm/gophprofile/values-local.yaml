@@ -35,7 +35,9 @@ serviceMonitor:
   enabled: true
 
 networkPolicy:
-  enabled: false
+  # On in local too, so the policy actually gets exercised (not just in prod).
+  # Bundled deps are reached via the same-namespace egress rule in the template.
+  enabled: true
 
 # Bundled deps on with the default dev creds.
 # Bitnami pulled these tags from docker.io/bitnami in 2025; the images now live

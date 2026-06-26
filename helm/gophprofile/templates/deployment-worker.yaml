@@ -28,6 +28,15 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      {{- if .Values.migrations.enabled }}
+      # Same migration gate as the server: both pods run it, golang-migrate's
+      # advisory lock makes the concurrent run safe.
+      initContainers:
+        {{- include "gophprofile.migrationInitContainers" . | nindent 8 }}
+      volumes:
+        - name: migrations
+          emptyDir: {}
+      {{- end }}
       containers:
         - name: worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"

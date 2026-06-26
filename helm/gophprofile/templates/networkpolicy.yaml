@@ -38,7 +38,17 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    # Dependencies (postgres, minio, rabbitmq).
+    # Bundled deps (Bitnami subcharts) sit in the same namespace as the app.
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 5672
+    # Deps living in another namespace (managed / external in-cluster).
     - to:
         - namespaceSelector:
             matchLabels:

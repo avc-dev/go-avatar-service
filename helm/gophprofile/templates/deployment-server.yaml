@@ -28,6 +28,15 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      {{- if .Values.migrations.enabled }}
+      # Migrate before the app container starts, so the pod never serves with an
+      # empty schema. See the gophprofile.migrationInitContainers helper.
+      initContainers:
+        {{- include "gophprofile.migrationInitContainers" . | nindent 8 }}
+      volumes:
+        - name: migrations
+          emptyDir: {}
+      {{- end }}
       containers:
         - name: server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"

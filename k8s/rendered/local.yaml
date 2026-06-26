@@ -1,4 +1,73 @@
 ---
+# Source: gophprofile/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gophprofile
+  labels:
+    helm.sh/chart: gophprofile-0.1.0
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/instance: gophprofile
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gophprofile
+      app.kubernetes.io/instance: gophprofile
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Public API from the ingress-nginx namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Metrics scrape from the monitoring namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8081
+  egress:
+    # DNS.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Bundled deps (Bitnami subcharts) sit in the same namespace as the app.
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 5672
+    # Deps living in another namespace (managed / external in-cluster).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 5672
+---
+---
 # Source: gophprofile/templates/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -12,28 +81,9 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 # App never calls the k8s API, so don't mount a token.
 automountServiceAccountToken: false
-
 ---
 ---
-# Source: gophprofile/templates/secret.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gophprofile
-  labels:
-    helm.sh/chart: gophprofile-0.1.0
-    app.kubernetes.io/name: gophprofile
-    app.kubernetes.io/instance: gophprofile
-    app.kubernetes.io/version: "0.1.0"
-    app.kubernetes.io/managed-by: Helm
-type: Opaque
-stringData:
-  POSTGRES_DSN: "postgres://avatars:avatars@gophprofile-postgresql:5432/avatars?sslmode=disable"
-  MINIO_ACCESS_KEY: "minioadmin"
-  MINIO_SECRET_KEY: "minioadmin"
-  RABBITMQ_URL: "amqp://user:changeme@gophprofile-rabbitmq:5672/"
-
----
+# Secret omitted from rendered output (contains credentials) — see gophprofile/templates/secret.yaml
 ---
 # Source: gophprofile/templates/configmap.yaml
 apiVersion: v1
@@ -71,7 +121,6 @@ data:
   BREAKER_TIMEOUT: "15s"
   BREAKER_MIN_REQUESTS: "5"
   BREAKER_FAILURE_RATIO: "0.6"
-
 ---
 ---
 # Source: gophprofile/templates/service-server.yaml
@@ -101,7 +150,6 @@ spec:
     - name: metrics
       port: 8081
       targetPort: metrics
-
 ---
 ---
 # Source: gophprofile/templates/service-worker.yaml
@@ -128,7 +176,6 @@ spec:
     - name: metrics
       port: 8081
       targetPort: metrics
-
 ---
 ---
 # Source: gophprofile/templates/deployment-server.yaml
@@ -169,6 +216,42 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      # Migrate before the app container starts, so the pod never serves with an
+      # empty schema. See the gophprofile.migrationInitContainers helper.
+      initContainers:
+        - name: copy-migrations
+          image: "gophprofile-app:local"
+          imagePullPolicy: Never
+          command: ["sh", "-c", "cp -r /app/migrations/* /migrations/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+        - name: migrate
+          image: "migrate/migrate:v4.18.3"
+          imagePullPolicy: IfNotPresent
+          args: ["-path=/migrations", "-database=$(POSTGRES_DSN)", "up"]
+          env:
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile
+                  key: POSTGRES_DSN
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          emptyDir: {}
       containers:
         - name: server
           image: "gophprofile-app:local"
@@ -208,7 +291,6 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
-
 ---
 ---
 # Source: gophprofile/templates/deployment-worker.yaml
@@ -249,6 +331,42 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      # Same migration gate as the server: both pods run it, golang-migrate's
+      # advisory lock makes the concurrent run safe.
+      initContainers:
+        - name: copy-migrations
+          image: "gophprofile-app:local"
+          imagePullPolicy: Never
+          command: ["sh", "-c", "cp -r /app/migrations/* /migrations/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+        - name: migrate
+          image: "migrate/migrate:v4.18.3"
+          imagePullPolicy: IfNotPresent
+          args: ["-path=/migrations", "-database=$(POSTGRES_DSN)", "up"]
+          env:
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile
+                  key: POSTGRES_DSN
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          emptyDir: {}
       containers:
         - name: worker
           image: "gophprofile-app:local"
@@ -287,7 +405,6 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
-
 ---
 ---
 # Source: gophprofile/templates/ingress.yaml
@@ -316,7 +433,6 @@ spec:
                 name: gophprofile-server
                 port:
                   name: http
-
 ---
 ---
 # Source: gophprofile/templates/servicemonitor.yaml
@@ -340,83 +456,3 @@ spec:
     - port: metrics
       path: /metrics
       interval: 30s
----
----
-# Source: gophprofile/templates/migration-job.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: gophprofile-migrate
-  labels:
-    helm.sh/chart: gophprofile-0.1.0
-    app.kubernetes.io/name: gophprofile
-    app.kubernetes.io/instance: gophprofile
-    app.kubernetes.io/version: "0.1.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: migrate
-  annotations:
-    helm.sh/hook: post-install,pre-upgrade
-    helm.sh/hook-weight: "-5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
-spec:
-  backoffLimit: 6
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: gophprofile
-        app.kubernetes.io/instance: gophprofile
-        app.kubernetes.io/component: migrate
-    spec:
-      restartPolicy: Never
-      serviceAccountName: gophprofile
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        seccompProfile:
-          type: RuntimeDefault
-      volumes:
-        - name: migrations
-          emptyDir: {}
-      # Copy the SQL out of the app image so migrate/migrate has one source of truth.
-      initContainers:
-        - name: copy-migrations
-          image: "gophprofile-app:local"
-          imagePullPolicy: Never
-          command: ["sh", "-c", "cp -r /app/migrations/* /migrations/"]
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop:
-                - ALL
-          volumeMounts:
-            - name: migrations
-              mountPath: /migrations
-      containers:
-        - name: migrate
-          image: "migrate/migrate:v4.18.3"
-          # Its own pull policy: migrate/migrate is an upstream image, so it must
-          # be pullable even when the app image is pinned to Never (side-loaded).
-          imagePullPolicy: IfNotPresent
-          args:
-            - "-path=/migrations"
-            - "-database=$(POSTGRES_DSN)"
-            - "up"
-          env:
-            - name: POSTGRES_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: gophprofile
-                  key: POSTGRES_DSN
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop:
-                - ALL
-          volumeMounts:
-            - name: migrations
-              mountPath: /migrations
-
