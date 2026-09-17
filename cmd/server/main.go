@@ -13,7 +13,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/avc-dev/go-avatar-service/internal/adminhttp"
 	"github.com/avc-dev/go-avatar-service/internal/bootutil"
 	"github.com/avc-dev/go-avatar-service/internal/broker"
 	"github.com/avc-dev/go-avatar-service/internal/config"
@@ -23,6 +25,7 @@ import (
 	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	"github.com/avc-dev/go-avatar-service/internal/observability"
 	repoavatar "github.com/avc-dev/go-avatar-service/internal/repository/avatar"
+	"github.com/avc-dev/go-avatar-service/internal/resilience"
 	svcavatar "github.com/avc-dev/go-avatar-service/internal/services/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/storage"
 )
@@ -144,7 +147,13 @@ func run() error {
 	// --- Application layer ---
 
 	avatarRepo := repoavatar.NewPostgresRepository(pool)
-	avatarSvc := svcavatar.New(avatarRepo, minioStore, rmq, log)
+	// Put circuit breakers in front of storage and the broker so a sick backend
+	// fails fast instead of stalling requests. The health handler below keeps the
+	// raw clients on purpose — a probe needs to reach the real dependency.
+	breakerSettings := cfg.Resilience.BreakerSettings()
+	guardedStorage := resilience.NewStorage(minioStore, breakerSettings, log)
+	guardedPublisher := resilience.NewPublisher(rmq, breakerSettings, log)
+	avatarSvc := svcavatar.New(avatarRepo, guardedStorage, guardedPublisher, log)
 	avatarH := handleravatar.NewHandler(avatarSvc, log, cfg.HTTP.MaxUploadBytes, uploadMetrics)
 
 	healthH := handlers.NewHealthHandler(
@@ -160,37 +169,57 @@ func run() error {
 	// time, so a slow query can never stall a Prometheus scrape.
 	go sampleStorageBytes(ctx, log, avatarRepo, storageMetrics)
 
-	// --- HTTP server + graceful shutdown ---
+	// --- HTTP servers (public API + admin) + graceful shutdown ---
 
-	srv := &http.Server{
+	// Public listener: API and SPA only. /health and /metrics live on the admin
+	// listener instead, so they stay off the Ingress and out of the rate limiter.
+	publicSrv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
-		Handler:           buildRouter(log, cfg.Security, healthH, avatarH, httpMetrics, metricsHandler, staticDir),
+		Handler:           buildRouter(log, cfg.Security, avatarH, httpMetrics, staticDir),
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
 		IdleTimeout:       cfg.HTTP.IdleTimeout,
 	}
-
-	serverErr := make(chan error, 1)
-	go func() {
-		log.Info("server listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErr <- err
-		}
-		close(serverErr)
-	}()
-
-	select {
-	case err := <-serverErr:
-		return fmt.Errorf("server listen: %w", err)
-	case <-ctx.Done():
-		log.Info("shutdown signal received")
+	adminSrv := &http.Server{
+		Addr:              ":" + cfg.HTTP.AdminPort,
+		Handler:           adminhttp.Router(healthH, metricsHandler),
+		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("server shutdown: %w", err)
+	// errgroup.WithContext buys us two things: the first error cancels gctx (so
+	// the other goroutines unblock), and g.Wait holds until they've all exited.
+	g, gctx := errgroup.WithContext(ctx)
+	serve := func(name string, srv *http.Server) {
+		g.Go(func() error {
+			log.Info("listening", "server", name, "addr", srv.Addr)
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return fmt.Errorf("%s listen: %w", name, err)
+			}
+			return nil
+		})
+	}
+	serve("public", publicSrv)
+	serve("admin", adminSrv)
+
+	// On signal (or one server dying) drain both within a single deadline.
+	g.Go(func() error {
+		<-gctx.Done()
+		log.Info("shutdown signal received")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout)
+		defer cancel()
+		var errs error
+		if err := publicSrv.Shutdown(shutdownCtx); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("public server shutdown: %w", err))
+		}
+		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("admin server shutdown: %w", err))
+		}
+		return errs
+	})
+
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	log.Info("server stopped")
 	return nil

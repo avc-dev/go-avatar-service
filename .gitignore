@@ -28,3 +28,6 @@
 
 # Compiled binary
 /app
+
+# Helm: pulled subcharts (commit Chart.lock instead and run `helm dependency build`)
+helm/*/charts/

@@ -1,7 +1,9 @@
 -include .env
 export
 
-.PHONY: help run-server run-worker build tidy test test-integration lint mocks up down logs ps migrate-up migrate-down docker-build
+.PHONY: help run-server run-worker build tidy test test-integration lint mocks up down logs ps migrate-up migrate-down docker-build helm-deps helm-lint helm-template
+
+HELM_CHART := helm/gophprofile
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -51,3 +53,15 @@ migrate-up: ## Apply DB migrations
 
 migrate-down: ## Rollback last DB migration
 	migrate -path migrations -database "$(POSTGRES_DSN)" down 1
+
+helm-deps: ## Pull Helm subcharts (Bitnami) and unpack them (helm v4 needs unpacked)
+	cd $(HELM_CHART) && helm dependency build && tar xzf charts/*.tgz -C charts/
+
+helm-lint: ## Lint the Helm chart (default + prod values)
+	helm lint $(HELM_CHART)
+	helm lint $(HELM_CHART) -f $(HELM_CHART)/values-prod.yaml
+
+helm-template: ## Render chart manifests for both envs into k8s/rendered/ (Secret stripped)
+	@mkdir -p k8s/rendered
+	helm template gophprofile $(HELM_CHART) -f $(HELM_CHART)/values-local.yaml | awk -f scripts/helm-render.awk > k8s/rendered/local.yaml
+	helm template gophprofile $(HELM_CHART) -f $(HELM_CHART)/values-prod.yaml | awk -f scripts/helm-render.awk > k8s/rendered/prod.yaml

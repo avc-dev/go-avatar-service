@@ -10,13 +10,15 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/avc-dev/go-avatar-service/internal/config"
-	"github.com/avc-dev/go-avatar-service/internal/handlers"
 	handleravatar "github.com/avc-dev/go-avatar-service/internal/handlers/avatar"
 	"github.com/avc-dev/go-avatar-service/internal/metrics"
 	mw "github.com/avc-dev/go-avatar-service/internal/middleware"
 )
 
-// buildRouter wires the HTTP routes. Middleware order is significant:
+// buildRouter wires the public routes: API, SPA, API docs. /health and /metrics
+// aren't here — they're on the admin listener, off the Ingress.
+//
+// Middleware order is significant:
 //   - RequestID first so downstream middlewares (and slog logs) can attach it.
 //   - Logger second so it captures the (potentially panic-recovered) status.
 //   - Recoverer next so panics from handlers are caught and a 500 is written
@@ -24,8 +26,8 @@ import (
 //   - CORS last in the global chain so preflight responses still go through
 //     RequestID + Logger and show up correlated in logs.
 //
-// Per-API middlewares (rate limit, UserID) are mounted on /api/v1 so /health
-// and the static /web/ assets stay throttle-free.
+// Per-API middlewares (rate limit, UserID) are mounted on /api/v1 so the static
+// /web/ assets and /swagger docs stay throttle-free.
 //
 // The two limiters are layered, not exclusive: writes hit the IP limiter and
 // the user limiter on top — whichever budget runs out first wins. That keeps
@@ -34,10 +36,8 @@ import (
 func buildRouter(
 	log *slog.Logger,
 	cfg config.SecurityConfig,
-	healthH *handlers.HealthHandler,
 	avatarH *handleravatar.Handler,
 	httpMetrics *metrics.HTTP,
-	metricsHandler http.Handler,
 	staticPath string,
 ) http.Handler {
 	r := chi.NewRouter()
@@ -49,11 +49,6 @@ func buildRouter(
 	r.Use(chimw.Recoverer)
 	r.Use(mw.CORS(cfg.CORSAllowedOrigins))
 
-	r.Get("/health", healthH.Get)
-	// /metrics is mounted outside the /api/v1 group so it carries neither the
-	// RED middleware (no self-measurement) nor the rate limiter.
-	r.Handle("/metrics", metricsHandler)
-
 	// Root redirects to the SPA so a stray browser hit on `/` lands on the UI
 	// rather than a 404.
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +56,7 @@ func buildRouter(
 	})
 
 	fileServer(r, "/web", http.Dir(staticPath))
+	mountSwagger(r)
 
 	ipLimit := mw.IPRateLimit(cfg.RateLimitReadPerMin)
 	userLimit := mw.UserIDRateLimit(cfg.RateLimitWritePerMin)
@@ -88,14 +84,15 @@ func buildRouter(
 	return otelhttp.NewHandler(r, "http.server", otelhttp.WithFilter(traceableRequest))
 }
 
-// traceableRequest reports whether a request should produce a server span. We
-// trace the API surface and skip health checks and static SPA assets.
+// traceableRequest decides whether a request gets a server span. We trace the
+// API and skip the root redirect, the SPA assets and the docs — otherwise
+// they'd flood the traces with noise.
 func traceableRequest(r *http.Request) bool {
 	p := r.URL.Path
 	switch {
-	case p == "/health", p == "/metrics", p == "/":
+	case p == "/":
 		return false
-	case strings.HasPrefix(p, "/web"):
+	case strings.HasPrefix(p, "/web"), strings.HasPrefix(p, "/swagger"):
 		return false
 	default:
 		return true

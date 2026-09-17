@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+
+	"github.com/avc-dev/go-avatar-service/internal/resilience"
 )
 
 type Config struct {
@@ -15,6 +17,7 @@ type Config struct {
 	RabbitMQ      RabbitMQConfig
 	Security      SecurityConfig
 	Observability ObservabilityConfig
+	Resilience    ResilienceConfig
 }
 
 type HTTPConfig struct {
@@ -25,9 +28,13 @@ type HTTPConfig struct {
 	IdleTimeout       time.Duration `env:"HTTP_IDLE_TIMEOUT" envDefault:"120s"`
 	ShutdownTimeout   time.Duration `env:"HTTP_SHUTDOWN_TIMEOUT" envDefault:"10s"`
 	MaxUploadBytes    int64         `env:"HTTP_MAX_UPLOAD_BYTES" envDefault:"10485760"`
-	// WorkerAdminPort is the port for the worker's minimal admin HTTP server
-	// (health, and later /metrics). The worker has no public HTTP surface, so
-	// this is the only listener it opens; the server binary ignores it.
+	// AdminPort is where the server serves /health and /metrics, separate from
+	// the public Port so probes and scrapes don't go through the Ingress and
+	// aren't subject to the API's rate limiting. The worker ignores it.
+	AdminPort string `env:"SERVER_ADMIN_PORT" envDefault:"8081"`
+	// WorkerAdminPort is the worker's only listener: a small admin server with
+	// /health and /metrics, since the worker has no public HTTP. The server
+	// ignores it.
 	WorkerAdminPort string `env:"WORKER_ADMIN_PORT" envDefault:"8081"`
 }
 
@@ -94,6 +101,29 @@ type ObservabilityConfig struct {
 	// decisions are always respected). 1.0 traces everything — the right
 	// default for dev; lower it under real load.
 	SampleRatio float64 `env:"OTEL_TRACES_SAMPLER_RATIO" envDefault:"1.0"`
+}
+
+// ResilienceConfig tunes the circuit breakers around object storage and the
+// broker. The defaults trip after a sustained majority of failures and probe
+// again a few seconds later; bump the ratio or window to make them less eager.
+type ResilienceConfig struct {
+	BreakerMaxRequests  uint32        `env:"BREAKER_MAX_REQUESTS" envDefault:"3"`
+	BreakerInterval     time.Duration `env:"BREAKER_INTERVAL" envDefault:"30s"`
+	BreakerTimeout      time.Duration `env:"BREAKER_TIMEOUT" envDefault:"15s"`
+	BreakerMinRequests  uint32        `env:"BREAKER_MIN_REQUESTS" envDefault:"5"`
+	BreakerFailureRatio float64       `env:"BREAKER_FAILURE_RATIO" envDefault:"0.6"`
+}
+
+// BreakerSettings hands the env config to the resilience package, so server and
+// worker build the same breakers from one place.
+func (c ResilienceConfig) BreakerSettings() resilience.Settings {
+	return resilience.Settings{
+		MaxRequests:  c.BreakerMaxRequests,
+		Interval:     c.BreakerInterval,
+		Timeout:      c.BreakerTimeout,
+		MinRequests:  c.BreakerMinRequests,
+		FailureRatio: c.BreakerFailureRatio,
+	}
 }
 
 func Load() (*Config, error) {

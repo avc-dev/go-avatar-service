@@ -1,0 +1,91 @@
+# Production. External managed deps, secret supplied out of band.
+image:
+  # Pin to an immutable tag/digest in the real deploy.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+server:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    cpu: 70
+    memory: 80
+
+worker:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    cpu: 70
+    memory: 80
+
+ingress:
+  enabled: true
+  host: avatars.example.com
+  tls:
+    - secretName: avatars-tls
+      hosts:
+        - avatars.example.com
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+
+networkPolicy:
+  enabled: true
+  ingressNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  monitoringNamespaceSelector:
+    kubernetes.io/metadata.name: monitoring
+  # Where the external deps actually live, if in-cluster. Adjust per environment.
+  dependenciesNamespaceSelector:
+    kubernetes.io/metadata.name: data
+
+config:
+  otel:
+    enabled: true
+    endpoint: "otel-collector.observability.svc.cluster.local:4317"
+    environment: prod
+    sampleRatio: 0.1
+
+# Bundled deps off — use managed services.
+postgresql:
+  enabled: false
+minio:
+  enabled: false
+rabbitmq:
+  enabled: false
+
+# Provide the secret separately (created out of band) rather than rendering it.
+secret:
+  create: false
+  existingSecret: gophprofile-secrets
+
+# externalMinio.endpoint is non-secret and goes into the ConfigMap, so it must
+# be set even when secret.create is false (the existingSecret only covers the 4
+# secret keys). dsn/accessKey/secretKey/url are only read when secret.create is
+# true; with an existingSecret they can stay empty.
+externalPostgres:
+  dsn: ""
+externalMinio:
+  endpoint: "minio.data.svc.cluster.local:9000"
+  accessKey: ""
+  secretKey: ""
+externalRabbitmq:
+  url: ""
